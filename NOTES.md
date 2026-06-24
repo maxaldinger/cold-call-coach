@@ -2,21 +2,24 @@
 
 A single-user, **local-only** Windows desktop app that records a **cold call**,
 transcribes it locally with speaker labels, and on Stop makes ONE Claude API call
-that returns a **coaching report**: a scored breakdown of the call plus concrete,
-quoted feedback on how to do better next time — all judged against what **Bito**
-actually does.
+that returns a **coaching report** (a scored breakdown + concrete, quoted feedback)
+plus a **MEDDPICC** qualification snapshot — all judged against what **Bito**
+actually does. The post-call transcript is copy-paste-ready. Company positioning in
+Settings can be **auto-filled from a website URL** (an LLM parses the page).
 
 It is a spin-off of the sibling **Tell** app: it reuses Tell's hard-won audio
-capture + local Whisper transcription verbatim, and swaps Tell's CRM/MEDDPICC/LOU
-outputs for a cold-call coaching engine.
+capture + local Whisper transcription verbatim, and swaps Tell's CRM/LOU outputs
+for a cold-call coaching engine (keeping a MEDDPICC scorecard).
 
 ## Non-negotiables (carried from Tell)
 
-- **100% local.** The only outbound network request the app ever makes is the
-  Claude API call that produces the coaching report. Nothing else leaves the box.
+- **Local-first.** The only outbound requests are the Claude API calls (coaching +
+  MEDDPICC in one call; the optional website-positioning parse in another) and —
+  ONLY when you use Settings → "auto-fill from your website" — fetching that one URL
+  you paste. Audio and transcripts never leave the box.
 - **Transcripts are ephemeral.** Raw audio and the transcript live in memory only.
-  They are never written to disk or to SQLite. The schema has no column for either
-  — by design. Only the coaching report (scores + feedback) is persisted.
+  They are never written to disk or to SQLite (you can Copy the transcript to paste
+  elsewhere, but the app never stores it). Only the coaching report is persisted.
 - **Single user, single machine.** SQLite is the only datastore. No auth, no
   server, no multi-tenancy. DB file: `coldcallcoach.db`.
 - **Never fail silently.** Surface every error; keep the transcript in memory on

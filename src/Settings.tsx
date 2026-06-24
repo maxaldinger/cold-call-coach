@@ -2,6 +2,16 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Capability, ContextProfile, Objection, saveProfile } from "./context";
 
+// Mirrors the Rust coaching::SiteContext returned by parse_company_site.
+interface SiteContext {
+  company: string;
+  value_oneliner: string;
+  ideal_opener: string;
+  catalog: Capability[];
+  personas: string[];
+  objections: Objection[];
+}
+
 export function Settings({
   profile,
   onSaved,
@@ -25,6 +35,11 @@ export function Settings({
   const [keyMsg, setKeyMsg] = useState<string | null>(null);
   const [model, setModel] = useState(() => localStorage.getItem("ccc.model") || "claude-sonnet-4-6");
   const [aec, setAec] = useState(() => localStorage.getItem("ccc.aec") === "1");
+
+  // Website auto-fill (Settings → drop a URL → LLM fills the positioning fields).
+  const [siteUrl, setSiteUrl] = useState("");
+  const [fetching, setFetching] = useState(false);
+  const [fetchMsg, setFetchMsg] = useState<string | null>(null);
 
   useEffect(() => {
     invoke<boolean>("has_api_key")
@@ -50,6 +65,36 @@ export function Settings({
   const onAec = (v: boolean) => {
     setAec(v);
     localStorage.setItem("ccc.aec", v ? "1" : "0");
+  };
+
+  const autofill = async () => {
+    const url = siteUrl.trim();
+    if (!url) {
+      setFetchMsg("Enter your website URL first.");
+      return;
+    }
+    setFetching(true);
+    setFetchMsg(null);
+    try {
+      const model = localStorage.getItem("ccc.model") || "claude-sonnet-4-6";
+      const s = await invoke<SiteContext>("parse_company_site", { url, model });
+      // Fill what came back; keep existing values where the site gave nothing.
+      setDraft((d) => ({
+        ...d,
+        company: s.company?.trim() || d.company,
+        value_oneliner: s.value_oneliner?.trim() || d.value_oneliner,
+        ideal_opener: s.ideal_opener?.trim() || d.ideal_opener,
+        catalog: s.catalog && s.catalog.length ? s.catalog : d.catalog,
+        personas: s.personas && s.personas.length ? s.personas : d.personas,
+        objections: s.objections && s.objections.length ? s.objections : d.objections,
+      }));
+      setSaved(false);
+      setFetchMsg("Filled from your site — review the fields below, then Save.");
+    } catch (e) {
+      setFetchMsg(String(e));
+    } finally {
+      setFetching(false);
+    }
   };
 
   const set = (patch: Partial<ContextProfile>) => {
@@ -163,6 +208,33 @@ export function Settings({
             <span>Cancel the prospect's bleed from my mic</span>
           </label>
         </Field>
+
+        <div className="field shorthand-callout">
+          <div className="callout-head">
+            <span className="callout-badge">AUTO-FILL</span>
+            <div>
+              <label className="field-label">Fill positioning from your website</label>
+              <p className="field-hint">
+                Paste your company site URL — an LLM reads it and fills in the value prop,
+                capabilities, personas, and objections below. Review and Save afterward. Uses your
+                API key + one Claude call.
+              </p>
+            </div>
+          </div>
+          <div className="card-row">
+            <input
+              className="s-input"
+              placeholder="https://bito.ai"
+              value={siteUrl}
+              onChange={(e) => setSiteUrl(e.target.value)}
+              disabled={fetching}
+            />
+            <button className="ghost-btn" onClick={autofill} disabled={fetching || !siteUrl.trim()}>
+              {fetching ? "Reading…" : "Auto-fill"}
+            </button>
+          </div>
+          {fetchMsg && <p className="field-hint key-msg">{fetchMsg}</p>}
+        </div>
 
         <Field label="Company">
           <input

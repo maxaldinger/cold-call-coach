@@ -44,15 +44,16 @@ fn weight_for(key: &str) -> u32 {
 // Context passed in from the JS loadContext() (non-secret config)
 // ---------------------------------------------------------------------------
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Capability {
     pub name: String,
+    #[serde(default)]
     pub description: String,
     #[serde(default)]
     pub proof_points: Vec<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Objection {
     pub objection: String,
     #[serde(default)]
@@ -135,6 +136,16 @@ pub struct ClaimAudit {
     pub correction: Option<String>,
 }
 
+/// One MEDDPICC line. The qualification scorecard is secondary to the coaching;
+/// on a cold call most letters will be "missing", which is expected and honest.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct MeddpiccItem {
+    pub letter: String, // M | E | D | D | P | I | C | C
+    pub status: String, // covered | weak | missing
+    #[serde(default)]
+    pub note: String,
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct WentWell {
     pub point: String,
@@ -197,6 +208,9 @@ pub struct CoachingReport {
     pub dimensions: Vec<Dimension>,
     #[serde(default)]
     pub claim_audit: Vec<ClaimAudit>,
+    /// MEDDPICC qualification snapshot (8 entries, M/E/D/D/P/I/C/C).
+    #[serde(default)]
+    pub meddpicc: Vec<MeddpiccItem>,
     #[serde(default)]
     pub what_went_well: Vec<WentWell>,
     /// Optional: may be None when analyzable is false and nothing is actionable.
@@ -553,6 +567,118 @@ fn truncate(s: &str, n: usize) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Website → positioning (Settings auto-fill): fetch a company's own site and
+// have Claude extract a structured positioning profile to seed the editable
+// context. The extracted fields map 1:1 onto the editable ContextProfile.
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct SiteContext {
+    #[serde(default)]
+    pub company: String,
+    #[serde(default)]
+    pub value_oneliner: String,
+    #[serde(default)]
+    pub ideal_opener: String,
+    #[serde(default)]
+    pub catalog: Vec<Capability>,
+    #[serde(default)]
+    pub personas: Vec<String>,
+    #[serde(default)]
+    pub objections: Vec<Objection>,
+}
+
+/// Crude HTML → text: drop <script>/<style> blocks, strip tags, decode a few
+/// common entities, collapse whitespace, and cap length so the LLM call stays
+/// cheap. Good enough to feed an extraction prompt.
+fn html_to_text(html: &str) -> String {
+    use regex::Regex;
+    let script = Regex::new(r"(?is)<script[^>]*>.*?</script>").unwrap();
+    let style = Regex::new(r"(?is)<style[^>]*>.*?</style>").unwrap();
+    let tag = Regex::new(r"(?s)<[^>]+>").unwrap();
+    let s = script.replace_all(html, " ");
+    let s = style.replace_all(&s, " ");
+    let s = tag.replace_all(&s, " ");
+    let s = s
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&nbsp;", " ");
+    let collapsed = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    truncate(&collapsed, 40_000)
+}
+
+/// Fetch a URL and reduce it to readable text.
+async fn fetch_site_text(url: &str) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (compatible; ColdCallCoach/0.1)")
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .map_err(|e| format!("could not build HTTP client: {e}"))?;
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("could not fetch {url}: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("the site returned HTTP {}", resp.status().as_u16()));
+    }
+    let html = resp
+        .text()
+        .await
+        .map_err(|e| format!("could not read the site body: {e}"))?;
+    let text = html_to_text(&html);
+    if text.trim().is_empty() {
+        return Err("the page had no readable text (it may be a JS-only app)".into());
+    }
+    Ok(text)
+}
+
+/// Fetch a company's website and have Claude extract a positioning profile.
+/// The URL fetch is the only outbound request beyond the Claude call.
+pub async fn parse_company_site(key: &str, model: &str, url: &str) -> Result<SiteContext, String> {
+    let url = url.trim();
+    if url.is_empty() {
+        return Err("enter a website URL first".into());
+    }
+    let normalized = if url.starts_with("http://") || url.starts_with("https://") {
+        url.to_string()
+    } else {
+        format!("https://{url}")
+    };
+    let text = fetch_site_text(&normalized).await?;
+    let user = format!(
+        "Company website URL: {normalized}\n\nExtracted page text (may be truncated):\n{text}\n\nReturn ONLY the JSON object."
+    );
+    let raw = call_claude(key, model, SITE_SYSTEM_TEMPLATE, &user).await?;
+    let json = extract_json(&raw);
+    serde_json::from_str::<SiteContext>(&json)
+        .map_err(|e| format!("could not parse the model's positioning JSON: {e}"))
+}
+
+const SITE_SYSTEM_TEMPLATE: &str = r#"You are a B2B positioning analyst. From the text of a company's OWN website, extract a crisp, accurate positioning profile to seed a sales rep's call-context. You output STRICT JSON ONLY — no prose, no explanations, no markdown code fences.
+
+Extract ONLY what the website actually supports. Do NOT invent capabilities, metrics, customers, integrations, or claims that are not on the page — leave a field short or empty rather than guessing. Proof points (metrics like "45% faster") must be taken from the page, never fabricated.
+
+Return EXACTLY this JSON object (no extra keys, no markdown fences):
+{
+  "company": "<the company name>",
+  "value_oneliner": "<one crisp, outcome-led sentence a busy buyer would repeat — the company's core value prop, in their framing>",
+  "ideal_opener": "<a short, human cold-call opener a rep could use for this product; use {prospect} and {rep} as name placeholders>",
+  "catalog": [
+    { "name": "<product/capability name>", "description": "<one line>", "proof_points": ["<a metric/claim taken verbatim-ish from the site, or omit if none>"] }
+  ],
+  "personas": ["<the buyer roles this product targets, inferred from the site>"],
+  "objections": [
+    { "objection": "<a realistic objection for this product/category>", "response": "<an ideal response grounded ONLY in what the site supports>" }
+  ]
+}
+
+Keep catalog to the 2-5 most important capabilities, personas to the roles the site implies, and objections to 2-4 realistic ones with grounded responses. Output the JSON object only."#;
+
+// ---------------------------------------------------------------------------
 // The prompt (designed via the design-cold-call-coach workflow). {placeholders}
 // are filled by build_system_prompt via String::replace (NOT format!), so the
 // literal braces in the JSON example below are safe.
@@ -610,11 +736,15 @@ Extract EVERY product/value claim the [You] rep made about {company}, verbatim, 
 - unverifiable — plausible but the facts neither confirm nor deny it.
 matched_fact = the exact catalog capability/proof-point/security fact it maps to, or null. correction = drawn ONLY from the provided facts (a verbatim restatement of the real fact), null if accurate or unverifiable. If the rep made no product claims, emit an empty array (not null). NEVER invent the 'correct' number — only echo what the catalog provides.
 
+THE MEDDPICC SCORECARD (a qualification snapshot — secondary to the coaching)
+Also produce a "meddpicc" array of EXACTLY 8 entries, in this order and with these letters: M (Metrics), E (Economic buyer), D (Decision criteria), D (Decision process), P (Paper process), I (Identify pain), C (Champion), C (Competition). Each entry is { "letter", "status", "note" }: status is one of covered | weak | missing, and note is ONE grounded line. This is a COLD call — most elements will NOT have surfaced, so mark them "missing" honestly; NEVER invent qualification signal a transcript line doesn't support. Attribute correctly: a pain or buying signal counts only if a [Prospect] line states it, never a [You] pitch line. covered = clearly established on the call; weak = hinted/partial; missing = not surfaced (the norm on a cold call).
+
 ACTION-FIRST REPORTING (this is what the rep actually reads)
 - headline: one honest sentence in a coaching voice, defensible from the transcript.
 - highest_leverage_fix: the SINGLE change with the biggest payoff next call — { title, dimension_key, what_happened (verbatim quote), why_it_matters (one line), do_this_instead (a concrete line the rep could say verbatim next time, strictly within {company} facts), evidence_idx }. Chosen as argmax over scored dimensions of weight*(10-score), UNLESS the accuracy guardrail forces it to the accuracy problem. May be null only when analyzable=false and nothing is actionable.
 - dimensions[]: each of the 10 with { key, label, score, status, confidence, weight, what_happened (grounded observation or 'no evidence in transcript'), evidence_idx, what_to_do_better, suggested_rephrasing }.
 - claim_audit[]: as above.
+- meddpicc[]: exactly 8 entries (M, E, D, D, P, I, C, C in order) — see the MEDDPICC scorecard section.
 - what_went_well[]: 1-3 specific, quoted strengths (never generic praise), each with evidence_idx.
 - prioritized_fixes[]: up to 3 ordered fixes BEYOND the highest_leverage_fix, each { issue, do_this_instead, dimension_key }, ranked by impact.
 - missed_opportunities[]: pains/buying-signals the [Prospect] raised that the rep didn't act on, each tied to a prospect line by evidence_idx (empty array if none).
@@ -676,6 +806,9 @@ const OUTPUT_EXAMPLE: &str = r#"{
       "matched_fact": "<the catalog capability/proof-point/security fact it maps to, or null>",
       "correction": "<facts-only restatement of the real fact; null if accurate or unverifiable>"
     }
+  ],
+  "meddpicc": [
+    { "letter": "<M|E|D|D|P|I|C|C, in that order>", "status": "<covered|weak|missing>", "note": "<one grounded line; 'missing' if not surfaced>" }
   ],
   "what_went_well": [
     { "point": "<specific strength, never generic praise>", "evidence_idx": ["<ints>"] }

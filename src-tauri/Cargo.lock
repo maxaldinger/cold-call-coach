@@ -669,6 +669,7 @@ dependencies = [
  "cpal",
  "hound",
  "keyring",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

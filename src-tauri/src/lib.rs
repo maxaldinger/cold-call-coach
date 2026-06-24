@@ -300,6 +300,23 @@ fn has_api_key() -> bool {
     coaching::has_api_key()
 }
 
+/// Fetch a company's website and have Claude extract a positioning profile to
+/// seed the editable context (Settings auto-fill). Reads the key from the
+/// keychain; the URL fetch is the only outbound request beyond the Claude call.
+#[tauri::command]
+async fn parse_company_site(
+    url: String,
+    model: String,
+) -> Result<coaching::SiteContext, String> {
+    let key = coaching::read_api_key()?;
+    let model = if model.trim().is_empty() {
+        "claude-sonnet-4-6".to_string()
+    } else {
+        model
+    };
+    coaching::parse_company_site(&key, &model, &url).await
+}
+
 /// The one structured Claude call: labeled cold-call transcript (Rust memory) +
 /// key (keychain) + Bito context (passed in) → a structured coaching report. On
 /// any failure the transcript is retained so the user can retry without
@@ -376,6 +393,7 @@ pub fn run() {
             clean_retranscribe,
             set_api_key,
             has_api_key,
+            parse_company_site,
             analyze_call,
             set_render_device,
             set_capture_device,

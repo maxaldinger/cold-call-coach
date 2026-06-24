@@ -53,6 +53,12 @@ export interface ClaimAudit {
   correction: string | null;
 }
 
+export interface MeddpiccItem {
+  letter: string;
+  status: string; // covered | weak | missing
+  note: string;
+}
+
 export interface WentWell {
   point: string;
   evidence_idx: number[];
@@ -106,6 +112,7 @@ export interface CoachingReport {
   talk_metrics: TalkMetrics;
   dimensions: Dimension[];
   claim_audit: ClaimAudit[];
+  meddpicc: MeddpiccItem[];
   what_went_well: WentWell[];
   highest_leverage_fix: HighestLeverageFix | null;
   prioritized_fixes: PrioritizedFix[];
@@ -340,6 +347,47 @@ function ClaimAuditView({
   );
 }
 
+const MEDDPICC_LABELS = [
+  "Metrics",
+  "Economic buyer",
+  "Decision criteria",
+  "Decision process",
+  "Paper process",
+  "Identify pain",
+  "Champion",
+  "Competition",
+];
+
+function MeddpiccBlock({ items }: { items: MeddpiccItem[] }) {
+  return (
+    <div className="report-block">
+      <h3 className="block-title">
+        MEDDPICC
+        <span className="block-sub">
+          Qualification snapshot — a cold call surfaces little, and that's expected
+        </span>
+      </h3>
+      <ul className="meddpicc-list">
+        {items.map((m, i) => {
+          const st = (m.status || "missing").toLowerCase();
+          return (
+            <li key={i} className={`meddpicc-item status-${st}`}>
+              <span className="meddpicc-letter">{m.letter}</span>
+              <div className="meddpicc-main">
+                <div className="meddpicc-toprow">
+                  <span className="meddpicc-label">{MEDDPICC_LABELS[i] ?? ""}</span>
+                  <span className={`meddpicc-status status-${st}`}>{m.status}</span>
+                </div>
+                {m.note && <p className="meddpicc-note">{m.note}</p>}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 /** The full coaching report. Confidence-first: a null score / thin call leads
  *  with caveats and shows "—" for the number rather than a fabricated score. */
 export function ReportView({ report }: { report: CoachingReport }) {
@@ -415,6 +463,8 @@ export function ReportView({ report }: { report: CoachingReport }) {
           <ClaimAuditView rows={report.claim_audit} byIdx={byIdx} />
         </div>
       )}
+
+      {report.meddpicc && report.meddpicc.length > 0 && <MeddpiccBlock items={report.meddpicc} />}
 
       {report.missed_opportunities.length > 0 && (
         <div className="report-block">
@@ -508,6 +558,13 @@ export function reportToText(report: CoachingReport, prospect: string): string {
       const s = d.status === "scored" && d.score !== null ? `${d.score}/10` : STATUS_LABEL[d.status];
       L.push(`- ${d.label}: ${s}${d.what_to_do_better ? ` — ${d.what_to_do_better}` : ""}`);
     }
+  }
+  const meddLines = (report.meddpicc ?? [])
+    .map((m, i) => ({ m, label: MEDDPICC_LABELS[i] ?? m.letter }))
+    .filter((x) => (x.m.status || "").toLowerCase() !== "missing");
+  if (meddLines.length) {
+    L.push("", "MEDDPICC (what surfaced)");
+    meddLines.forEach((x) => L.push(`- ${x.label} (${x.m.status}): ${x.m.note}`));
   }
   if (report.prioritized_fixes.length) {
     L.push("", "NEXT-CALL FIXES");

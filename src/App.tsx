@@ -550,6 +550,9 @@ export default function App() {
                       : ""}
                   </span>
                   {!recording && transcript && (
+                    <CopyButton text={transcript} label="Copy transcript" />
+                  )}
+                  {!recording && transcript && (
                     <button
                       className="ghost-btn clean-btn"
                       onClick={cleanPass}

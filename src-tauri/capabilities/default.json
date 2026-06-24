@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Core + SQL + notification + dialog (allow-ask for the delete-call confirm only; not dialog:default) permissions for the main window. No opener/file-system grants — Cold Call Coach never opens URLs, reveals files, or writes documents; the only outbound call is the Claude API made from Rust.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "notification:default",
+    "dialog:allow-ask",
+    "sql:default",
+    "sql:allow-load",
+    "sql:allow-execute",
+    "sql:allow-select",
+    "sql:allow-close"
+  ]
+}

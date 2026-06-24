@@ -1,0 +1,30 @@
+# dependencies
+node_modules
+
+# frontend build
+dist
+dist-ssr
+
+# rust / tauri
+src-tauri/target
+src-tauri/gen/schemas
+
+# local databases & captured media must never be committed
+*.db
+*.db-journal
+*.wav
+
+# bundled binaries — large; populated before a bundle build (see NOTES.md):
+#   model: download ggml-medium.en.bin into src-tauri/resources/models/
+#   CUDA:  copy cudart64_*/cublas64_*/cublasLt64_* from the CUDA Toolkit
+src-tauri/resources/models/*.bin
+src-tauri/resources/cuda/*.dll
+
+# env / secrets
+.env
+.env.*
+
+# editor / os
+.DS_Store
+Thumbs.db
+*.local

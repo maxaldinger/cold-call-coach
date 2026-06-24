@@ -1,0 +1,37 @@
+[package]
+name = "cold-call-coach"
+version = "0.1.0"
+description = "Cold Call Coach — local cold-call recorder + AI coaching for a Bito rep"
+authors = ["Max"]
+edition = "2021"
+
+# The library that holds the app logic. The binary in src/main.rs is a thin
+# shim that calls coldcallcoach_lib::run(). This split is the Tauri 2 convention
+# and keeps the door open for mobile targets later.
+[lib]
+name = "coldcallcoach_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-sql = { version = "2", features = ["sqlite"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+cpal = "0.17.3"
+hound = "3.5.1"
+wasapi = "0.23.0"
+whisper-rs = { version = "0.16.0", features = ["cuda"] }
+tauri-plugin-notification = "2.3.3"
+keyring = { version = "3", features = ["windows-native"] }
+reqwest = { version = "0.13.4", features = ["json"] }
+tauri-plugin-dialog = "2.7.1"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

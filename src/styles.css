@@ -1,0 +1,47 @@
+:root {
+  --bg: #0e1117;
+  --bg-elev: #161b24;
+  --bg-elev-2: #1c2330;
+  --border: #262d3a;
+  --text: #e6e9ef;
+  --text-dim: #9aa4b2;
+  --text-faint: #5d6675;
+  --accent: #6366f1;
+  --accent-dim: #4f46e5;
+  --danger: #ef4444;
+  --ok: #22c55e;
+  --warn: #f59e0b;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  user-select: none;
+}
+
+code {
+  font-family: "JetBrains Mono", "Cascadia Code", ui-monospace, monospace;
+  font-size: 0.85em;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}

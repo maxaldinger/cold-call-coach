@@ -828,7 +828,7 @@ AI Architect (the codebase-intelligence knowledge graph) is the CORE WEDGE — n
 WHAT TO PRODUCE
 First CLASSIFY the call, then GRADE only what has signal.
 
-call_classification is one of: real_conversation | voicemail | gatekeeper_only | immediate_decline | too_short | non_call_audio. Set analyzable=true ONLY for real_conversation (and for an immediate_decline that still contains a real exchange to judge graceful disengagement). voicemail, gatekeeper_only, too_short, and non_call_audio set analyzable=false.
+call_classification is one of: real_conversation | voicemail | gatekeeper_only | immediate_decline | too_short | non_call_audio. Set analyzable=true for real_conversation, for an immediate_decline that still contains a real exchange, AND for a VOICEMAIL that contains an actual recorded pitch (a voicemail is a one-way message and IS scorable — see VOICEMAIL SCORING below). Set analyzable=false ONLY for gatekeeper_only, too_short, non_call_audio, or a voicemail with no real message (just a name + "call me back").
 
 THE EVIDENCE SPINE (this is how fabrication is made structurally impossible):
 Before scoring anything, build a FLAT `evidence` array of the transcript lines you will cite: each item is { "idx": <int, 0-based>, "speaker": "You"|"Prospect", "quote": "<a VERBATIM substring of an actual transcript line>", "tag": "<optional short label, e.g. opener / objection / close>" }. Every quote MUST be copied verbatim from the transcript with the correct speaker. You must NEVER author a line into `evidence` that is not in the transcript. Then EVERY dimension score, every claim_audit row, every strength, and every missed opportunity references this array by `evidence_idx` (an array of ints). A scored dimension with an empty evidence_idx is invalid output.
@@ -844,6 +844,11 @@ THE RUBRIC — score each of these 10 dimensions 0-10, or null when there is ins
 8. talk_listen_ratio — monologue bloat / failure to create space, from the line counts. Distinguish 'rep monologued' from 'prospect refused to engage'.
 9. tone_pace_filler — TEXT-ONLY: filler, hedging, run-ons. Lowest weight. Must carry a 'text-only, approximate' caveat; never invent stammering not present.
 10. next_step — exactly ONE specific, time-bound, PROSPECT-AGREED next step. A unilateral rep assertion is at most 'proposed', not 'secured'.
+
+VOICEMAIL SCORING — when call_classification is 'voicemail' (an actual recorded message), it is a ONE-WAY pitch, so SCORE the dimensions that apply and mark the rest not_applicable (do NOT bail to insufficient_signal):
+- SCORE these (status=scored): opener_pattern_interrupt = the message's HOOK (does the first line earn the listen, vs "hi this is X from Y, wanted to reach out"); reason_for_call; value_articulation_accuracy (crispness + the SAME accuracy audit and cap); relevance_personalization; tone_pace_filler (tight vs rambling, text-only); and next_step = did they leave a CLEAR callback ask — a number, or a concrete "I'll follow up Thursday"? A vague "talk soon" is weak; no ask at all is missing.
+- mark these not_applicable (a one-way message has no live exchange): permission_to_continue, discovery_questions, objection_handling, talk_listen_ratio.
+A strong cold-call voicemail is SHORT (~20-30s), leads with a hook, gives one crisp accurate reason + value, and ends with a clear callback ask. Set analyzable=true and emit a real overall_score from the scored dimensions.
 
 SCORING MODEL
 Each dimension carries score (0-10 or null), status (scored | not_applicable | insufficient_evidence), and confidence (high|medium|low). overall_score (0-100) is the weighted average over ONLY status=scored dimensions, renormalized: round(100 * sum(weight_i * score_i/10) / sum(weight_i)). Weights: next_step 18, value_articulation_accuracy 16, opener_pattern_interrupt 12, reason_for_call 11, discovery_questions 10, objection_handling 10, relevance_personalization 8, permission_to_continue 6, talk_listen_ratio 5, tone_pace_filler 4. Emit score_basis = the keys that counted. grade_band derives from overall_score: strong 80-100 | solid 60-79 | developing 40-59 | needs_work 0-39 | insufficient_signal when null. ACCURACY GUARDRAIL: if any claim_audit verdict is wrong_metric or not_a_bito_capability, grade_band cannot exceed 'developing' and highest_leverage_fix MUST target the accuracy problem. (Note: the overall_score, grade_band, and score_basis are also recomputed deterministically after you respond — emit your best values, but the math is enforced server-side.)
@@ -886,7 +891,7 @@ HARD ANTI-HALLUCINATION RULES (the #1 risk — follow exactly)
 6. No prosody claims: tone_pace_filler and all tonal notes are TEXT-ONLY (filler words, hedging, run-ons) and must disclaim that vocal tone/pace are not directly observable.
 7. Do not invent the prospect's identity, seniority, or pains. Judge relevance only from what the prospect revealed or the rep voiced; if the role is unknown, judge conservatively and lower confidence.
 8. Use null / insufficient_evidence / not_applicable LIBERALLY and without penalty when signal is thin — absent dimensions are EXCLUDED from the average, never scored 0. Fabricating a plausible-but-unsupported score is the worst possible failure; an honest null is correct.
-9. If analyzable=false (voicemail, gatekeeper_only, too_short, non_call_audio), DO NOT emit any status=scored dimension or a non-null overall_score. Produce the degraded shape: overall_score=null, grade_band='insufficient_signal', the gradeable fragments only (a voicemail's opener and any real Bito claims CAN still be claim-audited and noted), and a populated caveats string. A full scorecard on a voicemail is a hallucination.
+9. If analyzable=false (gatekeeper_only, too_short, non_call_audio, or a no-message voicemail), DO NOT emit any status=scored dimension or a non-null overall_score. Produce the degraded shape: overall_score=null, grade_band='insufficient_signal', any real Bito claims still claim-audited, and a populated caveats string. (A real voicemail message IS scored — see VOICEMAIL SCORING above — so it is NOT analyzable=false.)
 10. Output STRICT JSON ONLY matching the schema below — no prose, no markdown fences.
 
 OUTPUT — return EXACTLY this JSON object (same keys, no markdown fences):
@@ -894,7 +899,7 @@ OUTPUT — return EXACTLY this JSON object (same keys, no markdown fences):
 
 const OUTPUT_EXAMPLE: &str = r#"{
   "call_classification": "<one of: real_conversation | voicemail | gatekeeper_only | immediate_decline | too_short | non_call_audio>",
-  "analyzable": "<bool — true only when there is a real exchange to score; false for voicemail/gatekeeper/too_short/non_call_audio>",
+  "analyzable": "<bool — true for a real conversation OR a voicemail with an actual message; false for gatekeeper/too_short/non_call_audio or a no-message voicemail>",
   "confidence": "<high|medium|low — overall confidence given how much transcript signal backed the report>",
   "headline": "<one honest coaching-voice sentence, defensible from the transcript>",
   "overall_score": "<int 0-100, or null when analyzable is false / too thin>",

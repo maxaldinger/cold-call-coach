@@ -30,7 +30,12 @@ function loadWorkHours(): WorkHours {
 
 // ---- Mood model --------------------------------------------------------------
 
-const HALFLIFE_WH = 6; // a call's "feed" halves every 6 working hours
+// Volume-tuned for a sales rep: ~40 calls/day => thriving (maxed out), ~25/day
+// => content, ~10/day => hungry (losing health). A call's "feed" halves every
+// working DAY; decay is measured in working days so it pauses off-hours and the
+// calibration is independent of how long the work day is.
+const BASE_FEED = 1.8;
+const HALFLIFE_DAYS = 1;
 const LOOKBACK_DAYS = 14;
 
 interface CallRow {
@@ -76,10 +81,12 @@ function isWorkingNow(now: Date, cfg: WorkHours): boolean {
   return h >= cfg.start && h < cfg.end;
 }
 
-// A dial always counts (the habit); a higher score feeds more.
+// Volume rules; score is only a small ±15% modifier. A voicemail (null score)
+// counts as a full dial — for a sales rep, a dial is a dial.
 function feedAmount(score: number | null): number {
-  if (score === null || score === undefined) return 10;
-  return 12 + (Math.max(0, Math.min(100, score)) / 100) * 16; // 12–28
+  if (score === null || score === undefined) return BASE_FEED;
+  const s = Math.max(0, Math.min(100, score)) / 100;
+  return BASE_FEED * (0.85 + 0.3 * s);
 }
 
 interface PetState {
@@ -104,10 +111,12 @@ function computePet(calls: CallRow[], now: Date, cfg: WorkHours): PetState {
   const cutoff = now.getTime() - LOOKBACK_DAYS * 24 * 3_600_000;
   const recent = calls.filter((c) => c.at.getTime() >= cutoff);
 
+  // Decay in working DAYS = working-hours since the call / a work-day's length.
+  const workdayHours = Math.max(1, cfg.end - cfg.start);
   let happiness = 0;
   for (const c of recent) {
-    const wh = workingHoursBetween(c.at, now, cfg);
-    happiness += feedAmount(c.score) * Math.pow(0.5, wh / HALFLIFE_WH);
+    const workdays = workingHoursBetween(c.at, now, cfg) / workdayHours;
+    happiness += feedAmount(c.score) * Math.pow(0.5, workdays / HALFLIFE_DAYS);
   }
   happiness = Math.max(0, Math.min(100, Math.round(happiness)));
 
@@ -135,18 +144,60 @@ function computePet(calls: CallRow[], now: Date, cfg: WorkHours): PetState {
 }
 
 interface Mood {
-  emoji: string;
   word: string;
   nudge: string;
 }
 
 function mood(p: PetState): Mood {
-  if (p.isNew) return { emoji: "🥚", word: "new", nudge: "Score a call to hatch me!" };
-  if (p.sleeping) return { emoji: "😴", word: "napping", nudge: "resting until work hours" };
-  if (p.happiness >= 80) return { emoji: "😻", word: "thriving", nudge: "keep it going!" };
-  if (p.happiness >= 55) return { emoji: "😺", word: "content", nudge: "looking good" };
-  if (p.happiness >= 30) return { emoji: "😼", word: "peckish", nudge: "time for a call" };
-  return { emoji: "😿", word: "hungry", nudge: "feed me — make a call!" };
+  if (p.isNew) return { word: "new", nudge: "score a call to hatch me!" };
+  if (p.sleeping) return { word: "napping", nudge: "resting until work hours" };
+  if (p.happiness >= 80) return { word: "thriving", nudge: "keep dialing!" };
+  if (p.happiness >= 55) return { word: "content", nudge: "looking good" };
+  if (p.happiness >= 30) return { word: "peckish", nudge: "pick up the pace" };
+  return { word: "hungry", nudge: "feed me — make some calls!" };
+}
+
+// A little blob creature drawn in SVG — color + mouth + eyes react to mood.
+function BlobFace({ mood }: { mood: string }) {
+  const fill =
+    ({
+      thriving: "#34d399",
+      content: "#6ee7b7",
+      peckish: "#fbbf24",
+      hungry: "#f87171",
+      napping: "#6b7280",
+      new: "#5b6472",
+    } as Record<string, string>)[mood] ?? "#6ee7b7";
+  const sleeping = mood === "napping" || mood === "new";
+  const mouth =
+    ({
+      thriving: "M12 22 Q20 31 28 22",
+      content: "M14 23 Q20 28 26 23",
+      peckish: "M14 24 L26 24",
+      hungry: "M14 27 Q20 21 26 27",
+      napping: "M16 24 Q20 26 24 24",
+      new: "M16 24 Q20 26 24 24",
+    } as Record<string, string>)[mood] ?? "M14 23 Q20 28 26 23";
+  return (
+    <svg className="blob" viewBox="0 0 40 40" width="40" height="40" aria-hidden="true">
+      <path
+        d="M20 3 C30 3 37 11 37 21 C37 32 30 37 20 37 C10 37 3 32 3 21 C3 11 10 3 20 3 Z"
+        fill={fill}
+      />
+      {sleeping ? (
+        <>
+          <path d="M10 18 q3.5 2.5 7 0" stroke="#0e1117" strokeWidth="1.6" fill="none" strokeLinecap="round" />
+          <path d="M23 18 q3.5 2.5 7 0" stroke="#0e1117" strokeWidth="1.6" fill="none" strokeLinecap="round" />
+        </>
+      ) : (
+        <>
+          <circle cx="14" cy="18" r="2.3" fill="#0e1117" />
+          <circle cx="26" cy="18" r="2.3" fill="#0e1117" />
+        </>
+      )}
+      <path d={mouth} stroke="#0e1117" strokeWidth="1.9" fill="none" strokeLinecap="round" />
+    </svg>
+  );
 }
 
 // ---- Component ---------------------------------------------------------------
@@ -196,7 +247,7 @@ export function Pet({ refreshKey }: { refreshKey: number }) {
 
   return (
     <div className={`pet mood-${m.word}`} title={`${name} is ${m.word}`}>
-      <span className="pet-face">{m.emoji}</span>
+      <BlobFace mood={m.word} />
       <div className="pet-mid">
         <div className="pet-toprow">
           {editing ? (

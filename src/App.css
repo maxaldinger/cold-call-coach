@@ -1815,10 +1815,21 @@
   border-top: 1px solid var(--border);
   background: var(--bg-elev-2);
 }
-.pet-face {
-  font-size: 30px;
-  line-height: 1;
+.blob {
   flex: 0 0 auto;
+  display: block;
+}
+.pet:not(.mood-napping):not(.mood-new) .blob {
+  animation: pet-bob 2.6s ease-in-out infinite;
+}
+@keyframes pet-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2.5px);
+  }
 }
 .pet-mid {
   flex: 1 1 auto;

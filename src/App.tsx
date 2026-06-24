@@ -15,6 +15,7 @@ import {
   CopyButton,
   Empty,
   MeddpiccList,
+  MeddpiccReminder,
   Panel,
   ReportView,
   localIsoDate,
@@ -592,14 +593,14 @@ export default function App() {
               )}
             </Panel>
 
-            <Panel title="MEDDPICC" subtitle="Qualification snapshot">
+            <Panel
+              title="MEDDPICC"
+              subtitle={report ? "Qualification snapshot" : "What to gather on the call"}
+            >
               {report && report.meddpicc && report.meddpicc.length > 0 ? (
                 <MeddpiccList items={report.meddpicc} />
               ) : (
-                <Empty>
-                  The MEDDPICC qualification snapshot appears here after you score a call. On a cold
-                  call most letters read “missing” — that's expected.
-                </Empty>
+                <MeddpiccReminder />
               )}
             </Panel>
 

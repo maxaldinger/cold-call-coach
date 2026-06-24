@@ -380,6 +380,72 @@ export function MeddpiccList({ items }: { items: MeddpiccItem[] }) {
   );
 }
 
+// In-call reminder: what to GATHER for each MEDDPICC letter + what to capture to
+// build a POC. Grounded in the Bito "new customer intel" project's MEDDPICC + POC
+// plan (codebase scale, the AI-tool spend baseline, a real "wrong-output moment").
+const MEDDPICC_PROMPTS: { letter: string; name: string; ask: string }[] = [
+  { letter: "M", name: "Metrics", ask: "A number to cut in half — time-to-merge, review hours/week, or current AI-tool token spend." },
+  { letter: "E", name: "Economic Buyer", ask: "Who signs dev-tool spend over ~$50k? (Usually VP Eng / CTO.)" },
+  { letter: "D", name: "Decision Criteria", ask: "What must it clear — must-haves, security (SOC 2 / self-host), grounded-context quality." },
+  { letter: "D", name: "Decision Process", ask: "Steps + timeline to a yes. Is a POC/pilot required? Who else evaluates?" },
+  { letter: "P", name: "Paper Process", ask: "Procurement, legal, security review — what adds time after a good trial." },
+  { letter: "I", name: "Implicate the Pain", ask: "The pain AND its cost — context-blind AI code, rework, cross-repo switching." },
+  { letter: "C", name: "Champion", ask: "Who'll sell internally? Head of Platform / DevEx; staff/principal engineers feel it most." },
+  { letter: "C", name: "Competition", ask: "Which AI tools today (Copilot/Cursor/Claude Code)? Bito grounds them — doesn't replace." },
+];
+
+const POC_CAPTURE: { label: string; q: string; flag?: boolean }[] = [
+  { label: "Who's in the room", q: "Champion, who signs the PO, who can veto on security." },
+  { label: "Codebase scale", q: "How many repos, and total lines of code (ballpark)? — lands hardest." },
+  { label: "Team in scope", q: "How many engineers would actually be in the trial?" },
+  { label: "Stack & agents", q: "Dominant languages, and which AI coding tools today?" },
+  { label: "Planning tools", q: "Where do designs/tickets live — Jira, Linear, Confluence, Slack?" },
+  { label: "Slowest path", q: "Walk me through your slowest path from spec to merged PR." },
+  { label: "A “moment”", q: "When has an AI agent confidently shipped something just plain wrong?" },
+  { label: "A number to beat", q: "A recent estimate you'd love to cut in half." },
+  { label: "Economic baseline", q: "Current AI-tool spend (seats × annual) — so token savings convert to $.", flag: true },
+];
+
+/** Pre-call / pre-score reminder shown in the MEDDPICC panel — a cheat-sheet of
+ *  what to gather on the call. Replaced by the scorecard once a call is scored. */
+export function MeddpiccReminder() {
+  return (
+    <div className="reminder">
+      <div className="reminder-block">
+        <h3 className="reminder-title">On the call · fill MEDDPICC</h3>
+        <ul className="reminder-list">
+          {MEDDPICC_PROMPTS.map((m, i) => (
+            <li key={i} className="reminder-row">
+              <span className="reminder-letter">{m.letter}</span>
+              <div className="reminder-main">
+                <span className="reminder-name">{m.name}</span>
+                <p className="reminder-ask">{m.ask}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div className="reminder-block">
+        <h3 className="reminder-title">Capture to build a POC</h3>
+        <ul className="reminder-list">
+          {POC_CAPTURE.map((p, i) => (
+            <li key={i} className={`reminder-row ${p.flag ? "is-flagged" : ""}`}>
+              <span className="reminder-bullet">{p.flag ? "⚑" : "›"}</span>
+              <div className="reminder-main">
+                <span className="reminder-name">{p.label}</span>
+                <p className="reminder-ask">{p.q}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+        <p className="reminder-foot">
+          Score the call to turn your notes into the MEDDPICC scorecard.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 /** The full coaching report. Confidence-first: a null score / thin call leads
  *  with caveats and shows "—" for the number rather than a fabricated score. */
 export function ReportView({ report }: { report: CoachingReport }) {

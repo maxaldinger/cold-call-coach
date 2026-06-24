@@ -313,10 +313,11 @@ export default function App() {
   const cleanPass = async () => {
     setCleaning(true);
     setCaptureError(null);
+    const aec = localStorage.getItem("ccc.aec") === "1";
     try {
-      const t = await invoke<string>("clean_retranscribe");
+      const t = await invoke<string>("clean_retranscribe", { aec });
       setTranscript(t);
-      void notify("Cold Call Coach", "Clean transcript ready.");
+      void notify("Cold Call Coach", aec ? "Clean, de-echoed transcript ready." : "Clean transcript ready.");
     } catch (e) {
       setCaptureError(String(e));
     } finally {
@@ -384,6 +385,10 @@ export default function App() {
       setAnalyzing(false);
     }
   };
+
+  // Read fresh each render (status polls every 200ms) so the label reflects the
+  // Settings toggle without extra state plumbing.
+  const aecOn = localStorage.getItem("ccc.aec") === "1";
 
   const elapsed = recording ? status?.elapsed_secs ?? 0 : summary?.duration_secs ?? null;
   const hint = recording
@@ -490,8 +495,19 @@ export default function App() {
           )}
 
           <div className="headphone-note">
-            🎧 Wear headphones — it keeps the prospect's voice out of your mic, so “you” and
-            “prospect” stay cleanly separated in the transcript.
+            🎧 Headphones keep the prospect's voice out of your mic, so “you” and “prospect” stay
+            cleanly separated.{" "}
+            {aecOn ? (
+              <>
+                Bleed-cancellation is <strong>on</strong> — after the call, run a{" "}
+                <strong>Clean + de-echo</strong> pass before scoring.
+              </>
+            ) : (
+              <>
+                No headphones? Turn on <strong>bleed-cancellation</strong> in Settings, then run a
+                Clean pass after the call.
+              </>
+            )}
           </div>
 
           <section className="record-bar">
@@ -534,8 +550,17 @@ export default function App() {
                       : ""}
                   </span>
                   {!recording && transcript && (
-                    <button className="ghost-btn clean-btn" onClick={cleanPass} disabled={cleaning}>
-                      {cleaning ? "Re-transcribing…" : "↻ Clean pass"}
+                    <button
+                      className="ghost-btn clean-btn"
+                      onClick={cleanPass}
+                      disabled={cleaning}
+                      title={
+                        aecOn
+                          ? "Full per-source re-transcribe + cancel the prospect's bleed out of your mic"
+                          : "Full per-source re-transcribe for max quality"
+                      }
+                    >
+                      {cleaning ? "Re-transcribing…" : aecOn ? "↻ Clean + de-echo" : "↻ Clean pass"}
                     </button>
                   )}
                 </div>

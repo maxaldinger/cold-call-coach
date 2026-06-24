@@ -24,6 +24,7 @@ export function Settings({
   const [keyPresent, setKeyPresent] = useState(false);
   const [keyMsg, setKeyMsg] = useState<string | null>(null);
   const [model, setModel] = useState(() => localStorage.getItem("ccc.model") || "claude-sonnet-4-6");
+  const [aec, setAec] = useState(() => localStorage.getItem("ccc.aec") === "1");
 
   useEffect(() => {
     invoke<boolean>("has_api_key")
@@ -45,6 +46,10 @@ export function Settings({
   const onModel = (m: string) => {
     setModel(m);
     localStorage.setItem("ccc.model", m);
+  };
+  const onAec = (v: boolean) => {
+    setAec(v);
+    localStorage.setItem("ccc.aec", v ? "1" : "0");
   };
 
   const set = (patch: Partial<ContextProfile>) => {
@@ -147,6 +152,16 @@ export function Settings({
             <option value="claude-sonnet-4-6">claude-sonnet-4-6 (default)</option>
             <option value="claude-opus-4-8">claude-opus-4-8 (max quality)</option>
           </select>
+        </Field>
+
+        <Field
+          label="Not wearing headphones?"
+          hint="First-pass acoustic echo cancellation: cancels the prospect's voice bleeding into your mic so their words aren't double-counted as yours. Applied when you run a “Clean + de-echo” pass after the call. Leave OFF if you wear headphones (no bleed to cancel)."
+        >
+          <label className="toggle-row">
+            <input type="checkbox" checked={aec} onChange={(e) => onAec(e.target.checked)} />
+            <span>Cancel the prospect's bleed from my mic</span>
+          </label>
         </Field>
 
         <Field label="Company">

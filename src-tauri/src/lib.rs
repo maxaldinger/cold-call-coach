@@ -1,3 +1,4 @@
+pub mod aec;
 pub mod audio;
 pub mod coaching;
 pub mod transcribe;
@@ -252,6 +253,7 @@ fn stop_recording(
 fn clean_retranscribe(
     audio: tauri::State<'_, AudioState>,
     tx: tauri::State<'_, TranscriptionState>,
+    aec: bool,
 ) -> Result<String, String> {
     let (mic, sys) = {
         let cap = audio
@@ -270,7 +272,16 @@ fn clean_retranscribe(
             .cloned()
             .ok_or_else(|| "model not loaded".to_string())?
     };
-    let transcript = transcribe::clean_retranscribe(&transcriber, &mic, &sys)?;
+    // When the rep wasn't wearing headphones, cancel the prospect's loopback bleed
+    // out of the mic BEFORE transcribing, so their words aren't transcribed a
+    // second time and mis-attributed to [You]. With headphones (no echo) this is a
+    // near no-op. The system (prospect) buffer is the clean reference, untouched.
+    let mic_proc = if aec {
+        crate::aec::cancel_echo(&mic, &sys)
+    } else {
+        mic
+    };
+    let transcript = transcribe::clean_retranscribe(&transcriber, &mic_proc, &sys)?;
     *tx.last_transcript
         .lock()
         .map_err(|_| "transcription state poisoned".to_string())? = Some(transcript.clone());

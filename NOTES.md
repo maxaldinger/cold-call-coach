@@ -36,9 +36,34 @@ Two per-source live Whisper workers transcribe each stream independently and mer
 by timestamp into one labeled transcript. This is reliable **as long as the rep
 wears headphones** — otherwise the prospect's voice plays out the speakers and
 bleeds into the mic, so the mic stream picks up both voices and the same words get
-labeled twice. The UI shows a persistent 🎧 reminder. (A future upgrade could add
-acoustic echo cancellation using the loopback as a reference signal to drop the
-headphones requirement; deferred by choice for v1.)
+labeled twice. The UI shows a persistent 🎧 reminder.
+
+### Echo cancellation (first pass — `src-tauri/src/aec.rs`)
+
+For the no-headphones case there is now a **first-pass acoustic echo canceller**.
+Because the loopback buffer is the *exact* far-end reference (the samples that
+played out the speakers), we can model and subtract the echo:
+
+1. **Bulk-delay estimation** — normalized cross-correlation over a high-energy
+   window finds how far the mic's echo lags the reference (speaker/DAC/ADC latency
+   + acoustic travel).
+2. **NLMS adaptive FIR filter** (256 taps ≈ 16 ms, μ=0.3) on the delay-aligned
+   reference models the residual echo path and subtracts the predicted echo from
+   the mic; what's left is mostly the rep's voice.
+
+It runs in the **clean pass** (post-call, on the retained 16 kHz buffers), gated by
+a Settings toggle ("Not wearing headphones?" → `ccc.aec`). With headphones (no
+echo) the filter converges toward zero, so the mic passes through ~unchanged and
+it's safe to leave on. The `system` (prospect) buffer is the clean reference and is
+never altered.
+
+**Limitations (it's a first pass):** linear cancellation only (no residual spectral
+suppression), and only basic double-talk handling (conservative step size +
+adapt-only-when-the-reference-is-active). It applies to the clean pass, not the
+live ticker. The DSP math is covered by `cargo test aec` (synthetic-echo ERLE +
+no-reference passthrough) so it's verifiable without the CUDA/whisper build chain.
+A future hardening pass could add a proper double-talk detector + residual
+suppressor, or swap in WebRTC APM.
 
 ## The coaching engine (`src-tauri/src/coaching.rs`)
 

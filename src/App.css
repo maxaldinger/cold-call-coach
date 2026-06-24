@@ -1687,3 +1687,19 @@
   gap: 3px;
   min-width: 0;
 }
+
+/* ---- Settings toggle row (AEC) ---- */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.toggle-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}

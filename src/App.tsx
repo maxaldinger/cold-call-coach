@@ -118,6 +118,9 @@ function fmtTime(secs: number): string {
 export default function App() {
   const [dbStatus, setDbStatus] = useState<DbStatus>("initializing");
   const [dbError, setDbError] = useState<string | null>(null);
+  const [theme, setTheme] = useState<"dark" | "light">(() =>
+    localStorage.getItem("ccc.theme") === "light" ? "light" : "dark",
+  );
 
   const [devices, setDevices] = useState<DeviceList | null>(null);
   const [deviceError, setDeviceError] = useState<string | null>(null);
@@ -168,6 +171,12 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  // Apply the light/dark theme to the document + remember it.
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("ccc.theme", theme);
+  }, [theme]);
 
   // Seed + load the company-context profile once the DB (and its migrations) is ready.
   useEffect(() => {
@@ -421,6 +430,13 @@ export default function App() {
             {dbStatus === "ready" && "DB ready"}
             {dbStatus === "error" && "DB error"}
           </span>
+          <button
+            className="icon-btn"
+            title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+          >
+            {theme === "dark" ? "☀" : "☾"}
+          </button>
           <button
             className={`icon-btn ${historyOpen ? "is-active" : ""}`}
             title={

@@ -16,6 +16,22 @@
   -webkit-font-smoothing: antialiased;
 }
 
+/* White / light mode — toggled via <html data-theme="light"> */
+[data-theme="light"] {
+  --bg: #f6f7f9;
+  --bg-elev: #ffffff;
+  --bg-elev-2: #eef0f4;
+  --border: #d6dbe3;
+  --text: #1a1f29;
+  --text-dim: #4b5563;
+  --text-faint: #8b93a1;
+  --accent: #6366f1;
+  --accent-dim: #4f46e5;
+  --danger: #dc2626;
+  --ok: #16a34a;
+  --warn: #d97706;
+}
+
 * {
   box-sizing: border-box;
 }

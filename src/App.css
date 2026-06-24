@@ -11,7 +11,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 22px;
-  background: linear-gradient(180deg, #11151d 0%, #0e1117 100%);
+  background: var(--bg-elev);
   border-bottom: 1px solid var(--border);
   flex: 0 0 auto;
 }
@@ -254,7 +254,7 @@
   display: grid;
   place-items: center;
   border-radius: 6px;
-  background: #0e1117;
+  background: var(--bg);
   border: 1px solid var(--border);
   font-weight: 700;
   font-size: 12px;
@@ -1247,7 +1247,7 @@
   justify-content: center;
   border-radius: 50%;
   border: 3px solid var(--band, var(--border));
-  background: #0e1117;
+  background: var(--bg);
 }
 .score-num {
   font-size: 30px;
@@ -1280,7 +1280,7 @@
   border-radius: 999px;
   color: var(--band, var(--text));
   border: 1px solid var(--band-border, var(--border));
-  background: #0e1117;
+  background: var(--bg);
 }
 .class-chip,
 .conf-chip {
@@ -1604,7 +1604,7 @@
   border-radius: 999px;
   border: 1px solid var(--border);
   color: var(--text-dim);
-  background: #0e1117;
+  background: var(--bg);
 }
 .verdict-chip.verdict-accurate {
   color: var(--ok);
@@ -1678,7 +1678,7 @@
   font-weight: 700;
   color: var(--band, var(--text-dim));
   border: 1px solid var(--band-border, var(--border));
-  background: #0e1117;
+  background: var(--bg);
 }
 .call-main {
   flex: 1 1 auto;
@@ -1765,7 +1765,7 @@
   display: grid;
   place-items: center;
   border-radius: 5px;
-  background: #0e1117;
+  background: var(--bg);
   border: 1px solid var(--border);
   font-size: 11px;
   font-weight: 700;
@@ -1832,7 +1832,7 @@
   display: grid;
   place-items: center;
   border-radius: 50%;
-  background: #0e1117;
+  background: var(--bg);
   border: 1px solid var(--border);
   font-size: 11px;
   font-weight: 700;
@@ -1868,6 +1868,75 @@
 .reminder-tag.tag-flag {
   color: #fcd34d;
   border-color: #92400e;
+}
+
+/* ---- Lean report: dockings + expand ---- */
+.docks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dock {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--warn);
+}
+.dock-score {
+  flex: 0 0 auto;
+  min-width: 40px;
+  text-align: center;
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--warn);
+}
+.dock-den {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-faint);
+}
+.dock-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.dock-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.dock-why {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+.expand-btn {
+  align-self: flex-start;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 12px;
+}
+.expand-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.report-expanded {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
 }
 
 /* ---- Cold-call pet — a roaming blob habitat at the Coaching panel foot ---- */

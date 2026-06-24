@@ -457,6 +457,14 @@ export function ReportView({ report }: { report: CoachingReport }) {
   const byIdx = new Map(report.evidence.map((e) => [e.idx, e]));
   const thin = report.overall_score === null || !report.analyzable;
   const hlf = report.highest_leverage_fix;
+  const [expanded, setExpanded] = useState(false);
+
+  // Dimensions that actually lost points, worst-impact first.
+  const docked = report.dimensions
+    .filter((d) => d.status === "scored" && d.score !== null && (d.score as number) < 8)
+    .sort(
+      (a, b) => (b.weight ?? 0) * (10 - (b.score ?? 0)) - (a.weight ?? 0) * (10 - (a.score ?? 0)),
+    );
 
   return (
     <div className="report">
@@ -469,106 +477,117 @@ export function ReportView({ report }: { report: CoachingReport }) {
         </div>
       )}
 
-      {report.coaching_summary && <p className="coaching-summary">{report.coaching_summary}</p>}
-
       {hlf && (
         <div className="hlf">
           <div className="hlf-head">
-            <span className="hlf-badge">Highest-leverage fix</span>
+            <span className="hlf-badge">Biggest fix</span>
             <span className="hlf-title">{hlf.title}</span>
           </div>
-          {hlf.what_happened && (
-            <p className="hlf-what">
-              <span className="dim-tag">What happened</span>“{hlf.what_happened}”
-            </p>
-          )}
-          {hlf.why_it_matters && <p className="hlf-why">{hlf.why_it_matters}</p>}
           {hlf.do_this_instead && (
             <p className="dim-rephrase">
               <span className="dim-tag tag-say">Do this instead</span>“{hlf.do_this_instead}”
             </p>
           )}
-          <EvidenceQuotes idx={hlf.evidence_idx} byIdx={byIdx} />
         </div>
       )}
 
-      {report.what_went_well.length > 0 && (
+      {docked.length > 0 && (
         <div className="report-block">
-          <h3 className="block-title">What went well</h3>
-          <ul className="wins">
-            {report.what_went_well.map((w, i) => (
-              <li key={i} className="win">
-                <p className="win-point">{w.point}</p>
-                <EvidenceQuotes idx={w.evidence_idx} byIdx={byIdx} />
+          <h3 className="block-title">What's costing you points</h3>
+          <ul className="docks">
+            {docked.map((d) => (
+              <li key={d.key} className="dock">
+                <span className="dock-score">
+                  {d.score}
+                  <span className="dock-den">/10</span>
+                </span>
+                <div className="dock-main">
+                  <span className="dock-label">{d.label}</span>
+                  <p className="dock-why">{d.what_to_do_better || d.what_happened || "—"}</p>
+                </div>
               </li>
             ))}
           </ul>
         </div>
       )}
 
-      {report.dimensions.length > 0 && (
-        <div className="report-block">
-          <h3 className="block-title">Scorecard</h3>
-          <ul className="dims">
-            {report.dimensions.map((d) => (
-              <DimensionRow key={d.key} dim={d} byIdx={byIdx} />
-            ))}
-          </ul>
+      <button className="expand-btn" onClick={() => setExpanded((v) => !v)}>
+        {expanded ? "Hide full reasoning ▲" : "Show full reasoning ▼"}
+      </button>
+
+      {expanded && (
+        <div className="report-expanded">
+          {report.coaching_summary && (
+            <p className="coaching-summary">{report.coaching_summary}</p>
+          )}
+
+          {report.dimensions.length > 0 && (
+            <div className="report-block">
+              <h3 className="block-title">Full scorecard</h3>
+              <ul className="dims">
+                {report.dimensions.map((d) => (
+                  <DimensionRow key={d.key} dim={d} byIdx={byIdx} />
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {report.claim_audit.length > 0 && (
+            <div className="report-block">
+              <h3 className="block-title">
+                Bito claim audit
+                <span className="block-sub">
+                  Every product claim, checked against what Bito actually does
+                </span>
+              </h3>
+              <ClaimAuditView rows={report.claim_audit} byIdx={byIdx} />
+            </div>
+          )}
+
+          {report.missed_opportunities.length > 0 && (
+            <div className="report-block">
+              <h3 className="block-title">Missed openings</h3>
+              <ul className="missed">
+                {report.missed_opportunities.map((m, i) => (
+                  <li key={i} className="miss">
+                    <p className="miss-signal">{m.signal}</p>
+                    {m.what_to_do && <p className="miss-do">{m.what_to_do}</p>}
+                    <EvidenceQuotes idx={m.evidence_idx} byIdx={byIdx} />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {report.prioritized_fixes.length > 0 && (
+            <div className="report-block">
+              <h3 className="block-title">Next-call fixes</h3>
+              <ol className="fixes">
+                {report.prioritized_fixes.map((f, i) => (
+                  <li key={i} className="fix">
+                    <p className="fix-issue">{f.issue}</p>
+                    {f.do_this_instead && (
+                      <p className="dim-rephrase">
+                        <span className="dim-tag tag-say">Do this</span>
+                        {f.do_this_instead}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+
+          {report.drill && (
+            <div className="drill">
+              <span className="drill-badge">Drill</span>
+              {report.drill}
+            </div>
+          )}
+
+          <TalkMetricsView m={report.talk_metrics} />
         </div>
       )}
-
-      {report.claim_audit.length > 0 && (
-        <div className="report-block">
-          <h3 className="block-title">
-            Bito claim audit
-            <span className="block-sub">Every product claim, checked against what Bito actually does</span>
-          </h3>
-          <ClaimAuditView rows={report.claim_audit} byIdx={byIdx} />
-        </div>
-      )}
-
-      {report.missed_opportunities.length > 0 && (
-        <div className="report-block">
-          <h3 className="block-title">Missed openings</h3>
-          <ul className="missed">
-            {report.missed_opportunities.map((m, i) => (
-              <li key={i} className="miss">
-                <p className="miss-signal">{m.signal}</p>
-                {m.what_to_do && <p className="miss-do">{m.what_to_do}</p>}
-                <EvidenceQuotes idx={m.evidence_idx} byIdx={byIdx} />
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {report.prioritized_fixes.length > 0 && (
-        <div className="report-block">
-          <h3 className="block-title">Next-call fixes</h3>
-          <ol className="fixes">
-            {report.prioritized_fixes.map((f, i) => (
-              <li key={i} className="fix">
-                <p className="fix-issue">{f.issue}</p>
-                {f.do_this_instead && (
-                  <p className="dim-rephrase">
-                    <span className="dim-tag tag-say">Do this</span>
-                    {f.do_this_instead}
-                  </p>
-                )}
-              </li>
-            ))}
-          </ol>
-        </div>
-      )}
-
-      {report.drill && (
-        <div className="drill">
-          <span className="drill-badge">Drill</span>
-          {report.drill}
-        </div>
-      )}
-
-      <TalkMetricsView m={report.talk_metrics} />
     </div>
   );
 }

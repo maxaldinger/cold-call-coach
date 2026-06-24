@@ -168,11 +168,13 @@ export function Panel({
   title,
   subtitle,
   action,
+  footer,
   children,
 }: {
   title: string;
   subtitle?: string;
   action?: React.ReactNode;
+  footer?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -185,6 +187,7 @@ export function Panel({
         {action}
       </div>
       <div className="panel-body">{children}</div>
+      {footer}
     </section>
   );
 }

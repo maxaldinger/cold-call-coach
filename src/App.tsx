@@ -9,6 +9,7 @@ import {
 } from "@tauri-apps/plugin-notification";
 import { Settings } from "./Settings";
 import { History } from "./History";
+import { Pet } from "./Pet";
 import { ContextProfile, loadContext } from "./context";
 import {
   CoachingReport,
@@ -147,6 +148,8 @@ export default function App() {
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
   const [report, setReport] = useState<CoachingReport | null>(null);
+  // Bumped after a call is scored so the pet (bottom of Coaching) re-reads history.
+  const [petRefresh, setPetRefresh] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -379,6 +382,7 @@ export default function App() {
       } catch (e) {
         setAnalyzeError(`Report ready but could not be saved to history: ${String(e)}`);
       }
+      setPetRefresh((r) => r + 1); // feed the pet
       const scoreText = out.overall_score === null ? "no score (thin call)" : `${out.overall_score}/100`;
       void notify("Cold Call Coach", `Coaching ready for ${who} — ${scoreText}`);
     } catch (e) {
@@ -576,6 +580,7 @@ export default function App() {
             <Panel
               title="Coaching"
               subtitle="Scorecard + how to do better"
+              footer={<Pet refreshKey={petRefresh} />}
               action={
                 report ? (
                   <CopyButton text={reportToText(report, prospect)} label="Copy" />

@@ -41,6 +41,13 @@ export function Settings({
   const [fetching, setFetching] = useState(false);
   const [fetchMsg, setFetchMsg] = useState<string | null>(null);
 
+  // Working hours — when the call pet expects you dialing (it only decays then).
+  const [workStart, setWorkStart] = useState(() => localStorage.getItem("ccc.workStart") || "9");
+  const [workEnd, setWorkEnd] = useState(() => localStorage.getItem("ccc.workEnd") || "17");
+  const [workWeekends, setWorkWeekends] = useState(
+    () => localStorage.getItem("ccc.workWeekends") === "1",
+  );
+
   useEffect(() => {
     invoke<boolean>("has_api_key")
       .then(setKeyPresent)
@@ -207,6 +214,48 @@ export function Settings({
             <input type="checkbox" checked={aec} onChange={(e) => onAec(e.target.checked)} />
             <span>Cancel the prospect's bleed from my mic</span>
           </label>
+        </Field>
+
+        <Field
+          label="Working hours"
+          hint="When your call pet expects you dialing (24-hour). It only gets hungry during these hours and naps evenings/weekends."
+        >
+          <div className="card-row work-hours">
+            <input
+              className="s-input work-hour"
+              type="number"
+              min={0}
+              max={23}
+              value={workStart}
+              onChange={(e) => {
+                setWorkStart(e.target.value);
+                localStorage.setItem("ccc.workStart", e.target.value);
+              }}
+            />
+            <span className="work-sep">to</span>
+            <input
+              className="s-input work-hour"
+              type="number"
+              min={1}
+              max={24}
+              value={workEnd}
+              onChange={(e) => {
+                setWorkEnd(e.target.value);
+                localStorage.setItem("ccc.workEnd", e.target.value);
+              }}
+            />
+            <label className="toggle-row">
+              <input
+                type="checkbox"
+                checked={workWeekends}
+                onChange={(e) => {
+                  setWorkWeekends(e.target.checked);
+                  localStorage.setItem("ccc.workWeekends", e.target.checked ? "1" : "0");
+                }}
+              />
+              <span>include weekends</span>
+            </label>
+          </div>
         </Field>
 
         <div className="field shorthand-callout">

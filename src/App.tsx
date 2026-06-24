@@ -363,7 +363,8 @@ export default function App() {
         objections: profile.objections,
         extra_context: profile.extra_context,
       };
-      const model = localStorage.getItem("ccc.model") || "claude-haiku-4-5-20251001";
+      const model = localStorage.getItem("ccc.model") || "gpt-5.4-mini";
+      const effort = localStorage.getItem("ccc.effort") || "low";
       const now = new Date();
       const humanDate = now.toLocaleDateString("en-US", {
         year: "numeric",
@@ -377,6 +378,7 @@ export default function App() {
         prospect: who,
         date: humanDate,
         model,
+        effort,
       });
       setReport(out);
 

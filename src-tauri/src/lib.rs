@@ -294,10 +294,22 @@ fn set_api_key(key: String) -> Result<(), String> {
     coaching::save_api_key(&key)
 }
 
-/// Whether an API key is present (never returns the key itself).
+/// Whether an Anthropic API key is present (never returns the key itself).
 #[tauri::command]
 fn has_api_key() -> bool {
     coaching::has_api_key()
+}
+
+/// Save the OpenAI API key (for GPT models) to the OS keychain.
+#[tauri::command]
+fn set_openai_key(key: String) -> Result<(), String> {
+    coaching::save_openai_key(&key)
+}
+
+/// Whether an OpenAI API key is present (never returns the key itself).
+#[tauri::command]
+fn has_openai_key() -> bool {
+    coaching::has_openai_key()
 }
 
 /// Fetch a company's website and have Claude extract a positioning profile to
@@ -307,14 +319,19 @@ fn has_api_key() -> bool {
 async fn parse_company_site(
     url: String,
     model: String,
+    effort: String,
 ) -> Result<coaching::SiteContext, String> {
-    let key = coaching::read_api_key()?;
     let model = if model.trim().is_empty() {
-        "claude-haiku-4-5-20251001".to_string()
+        "gpt-5.4-mini".to_string()
     } else {
         model
     };
-    coaching::parse_company_site(&key, &model, &url).await
+    let key = if coaching::is_openai(&model) {
+        coaching::read_openai_key()?
+    } else {
+        coaching::read_api_key()?
+    };
+    coaching::parse_company_site(&key, &model, &effort, &url).await
 }
 
 /// The one structured Claude call: labeled cold-call transcript (Rust memory) +
@@ -328,6 +345,7 @@ async fn analyze_call(
     prospect: String,
     date: String,
     model: String,
+    effort: String,
 ) -> Result<coaching::CoachingReport, String> {
     // The prospect name is optional — the prompt falls back to "unknown".
     let prospect = prospect.trim().to_string();
@@ -342,13 +360,17 @@ async fn analyze_call(
     if transcript.trim().is_empty() {
         return Err("the transcript is empty — nothing to coach from".into());
     }
-    let key = coaching::read_api_key()?;
     let model = if model.trim().is_empty() {
-        "claude-haiku-4-5-20251001".to_string()
+        "gpt-5.4-mini".to_string()
     } else {
         model
     };
-    coaching::run_coaching(&key, &model, &context, &prospect, &date, &transcript).await
+    let key = if coaching::is_openai(&model) {
+        coaching::read_openai_key()?
+    } else {
+        coaching::read_api_key()?
+    };
+    coaching::run_coaching(&key, &model, &effort, &context, &prospect, &date, &transcript).await
 }
 
 /// Database migrations. Versioned and append-only — never edit a shipped
@@ -391,6 +413,8 @@ pub fn run() {
             clean_retranscribe,
             set_api_key,
             has_api_key,
+            set_openai_key,
+            has_openai_key,
             parse_company_site,
             analyze_call,
             set_render_device,

@@ -33,9 +33,11 @@ export function Settings({
   const [keyInput, setKeyInput] = useState("");
   const [keyPresent, setKeyPresent] = useState(false);
   const [keyMsg, setKeyMsg] = useState<string | null>(null);
-  const [model, setModel] = useState(
-    () => localStorage.getItem("ccc.model") || "claude-haiku-4-5-20251001",
-  );
+  const [openaiKeyInput, setOpenaiKeyInput] = useState("");
+  const [openaiKeyPresent, setOpenaiKeyPresent] = useState(false);
+  const [openaiKeyMsg, setOpenaiKeyMsg] = useState<string | null>(null);
+  const [model, setModel] = useState(() => localStorage.getItem("ccc.model") || "gpt-5.4-mini");
+  const [effort, setEffort] = useState(() => localStorage.getItem("ccc.effort") || "low");
   const [aec, setAec] = useState(() => localStorage.getItem("ccc.aec") === "1");
 
   // Website auto-fill (Settings → drop a URL → LLM fills the positioning fields).
@@ -53,6 +55,9 @@ export function Settings({
   useEffect(() => {
     invoke<boolean>("has_api_key")
       .then(setKeyPresent)
+      .catch(() => {});
+    invoke<boolean>("has_openai_key")
+      .then(setOpenaiKeyPresent)
       .catch(() => {});
   }, []);
 
@@ -75,6 +80,21 @@ export function Settings({
     setAec(v);
     localStorage.setItem("ccc.aec", v ? "1" : "0");
   };
+  const onEffort = (e: string) => {
+    setEffort(e);
+    localStorage.setItem("ccc.effort", e);
+  };
+  const saveOpenaiKey = async () => {
+    setOpenaiKeyMsg(null);
+    try {
+      await invoke("set_openai_key", { key: openaiKeyInput.trim() });
+      setOpenaiKeyPresent(true);
+      setOpenaiKeyInput("");
+      setOpenaiKeyMsg("Saved to your OS keychain.");
+    } catch (e) {
+      setOpenaiKeyMsg(String(e));
+    }
+  };
 
   const autofill = async () => {
     const url = siteUrl.trim();
@@ -85,8 +105,9 @@ export function Settings({
     setFetching(true);
     setFetchMsg(null);
     try {
-      const model = localStorage.getItem("ccc.model") || "claude-haiku-4-5-20251001";
-      const s = await invoke<SiteContext>("parse_company_site", { url, model });
+      const model = localStorage.getItem("ccc.model") || "gpt-5.4-mini";
+      const effort = localStorage.getItem("ccc.effort") || "low";
+      const s = await invoke<SiteContext>("parse_company_site", { url, model, effort });
       // Fill what came back; keep existing values where the site gave nothing.
       setDraft((d) => ({
         ...d,
@@ -201,14 +222,49 @@ export function Settings({
           {keyMsg && <p className="field-hint key-msg">{keyMsg}</p>}
         </div>
 
+        <div className="field key-field">
+          <label className="field-label">OpenAI API key</label>
+          <p className="field-hint">
+            Needed for GPT models (e.g. gpt-5.4-mini). Stored in your OS keychain, same as above.{" "}
+            {openaiKeyPresent ? "✓ A key is currently saved." : "No key saved yet."}
+          </p>
+          <div className="card-row">
+            <input
+              className="s-input"
+              type="password"
+              autoComplete="off"
+              placeholder={openaiKeyPresent ? "•••••• saved — paste a new key to replace" : "sk-…"}
+              value={openaiKeyInput}
+              onChange={(e) => setOpenaiKeyInput(e.target.value)}
+            />
+            <button className="ghost-btn" onClick={saveOpenaiKey} disabled={!openaiKeyInput.trim()}>
+              Save key
+            </button>
+          </div>
+          {openaiKeyMsg && <p className="field-hint key-msg">{openaiKeyMsg}</p>}
+        </div>
+
         <Field
           label="Model"
-          hint="Default Haiku 4.5 (fastest scoring). Bump to Sonnet/Opus for deeper coaching at the cost of speed."
+          hint="Type any model ID. GPT (gpt-5.4-mini, gpt-5.4-nano) routes to OpenAI; claude-* routes to Anthropic. gpt-5.4-mini is a fast, cheap, accurate default."
         >
-          <select className="device-select" value={model} onChange={(e) => onModel(e.target.value)}>
-            <option value="claude-haiku-4-5-20251001">claude-haiku-4-5 (fastest · default)</option>
-            <option value="claude-sonnet-4-6">claude-sonnet-4-6 (balanced)</option>
-            <option value="claude-opus-4-8">claude-opus-4-8 (max quality)</option>
+          <input
+            className="s-input"
+            value={model}
+            onChange={(e) => onModel(e.target.value)}
+            placeholder="gpt-5.4-mini"
+            spellCheck={false}
+          />
+        </Field>
+
+        <Field
+          label="Level"
+          hint="OpenAI reasoning effort — Instant = fastest/cheapest, High = most thorough. (Ignored by Claude models.)"
+        >
+          <select className="device-select" value={effort} onChange={(e) => onEffort(e.target.value)}>
+            <option value="low">Instant (fastest)</option>
+            <option value="medium">Medium</option>
+            <option value="high">High (most thorough)</option>
           </select>
         </Field>
 

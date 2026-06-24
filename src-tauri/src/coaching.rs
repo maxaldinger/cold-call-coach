@@ -20,6 +20,8 @@ const KEY_USER: &str = "anthropic_api_key";
 const ANTHROPIC_URL: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const MAX_TOKENS: u32 = 8192;
+const KEY_USER_OPENAI: &str = "openai_api_key";
+const OPENAI_URL: &str = "https://api.openai.com/v1/chat/completions";
 
 /// Canonical per-dimension weights (what determines cold-call outcomes). The
 /// overall score is recomputed in Rust from these — never trusted to the model.
@@ -264,6 +266,38 @@ pub fn has_api_key() -> bool {
         .unwrap_or(false)
 }
 
+fn openai_key_entry() -> Result<keyring::Entry, String> {
+    keyring::Entry::new(KEY_SERVICE, KEY_USER_OPENAI).map_err(|e| format!("keychain error: {e}"))
+}
+
+pub fn read_openai_key() -> Result<String, String> {
+    let k = openai_key_entry()?
+        .get_password()
+        .map_err(|_| "no OpenAI API key set — add it in Settings".to_string())?;
+    if k.trim().is_empty() {
+        return Err("the saved OpenAI API key is empty".into());
+    }
+    Ok(k)
+}
+
+pub fn save_openai_key(key: &str) -> Result<(), String> {
+    let k = key.trim();
+    if k.is_empty() {
+        return Err("API key is empty".into());
+    }
+    openai_key_entry()?
+        .set_password(k)
+        .map_err(|e| format!("could not save key to keychain: {e}"))
+}
+
+pub fn has_openai_key() -> bool {
+    openai_key_entry()
+        .ok()
+        .and_then(|e| e.get_password().ok())
+        .map(|k| !k.trim().is_empty())
+        .unwrap_or(false)
+}
+
 // ---------------------------------------------------------------------------
 // Prompt assembly
 // ---------------------------------------------------------------------------
@@ -414,6 +448,87 @@ async fn call_claude(key: &str, model: &str, system: &str, user: &str) -> Result
     Ok(out.to_string())
 }
 
+/// True if `model` is an OpenAI model (vs an Anthropic/Claude one). Routing is by
+/// name so a free-text model field "just works" for whatever ID OpenAI ships.
+pub fn is_openai(model: &str) -> bool {
+    let m = model.trim().to_ascii_lowercase();
+    m.starts_with("gpt") || m.starts_with("chatgpt") || m.starts_with("o1") || m.starts_with("o3") || m.starts_with("o4")
+}
+
+/// OpenAI chat-completions call. `effort` (if non-empty) maps to reasoning_effort
+/// (the instant/medium/high speed level). max_tokens is intentionally omitted so
+/// the request shape stays valid across GPT-5.x variants.
+async fn call_openai(
+    key: &str,
+    model: &str,
+    effort: &str,
+    system: &str,
+    user: &str,
+    json_mode: bool,
+) -> Result<String, String> {
+    let mut body = serde_json::json!({
+        "model": model,
+        "messages": [
+            { "role": "system", "content": system },
+            { "role": "user", "content": user }
+        ],
+    });
+    if json_mode {
+        body["response_format"] = serde_json::json!({ "type": "json_object" });
+    }
+    if !effort.trim().is_empty() {
+        body["reasoning_effort"] = serde_json::json!(effort.trim());
+    }
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(OPENAI_URL)
+        .header("authorization", format!("Bearer {key}"))
+        .header("content-type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("network error calling OpenAI: {e}"))?;
+
+    let status = resp.status();
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| format!("error reading OpenAI response: {e}"))?;
+
+    if !status.is_success() {
+        let msg = serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|v| v["error"]["message"].as_str().map(str::to_string))
+            .unwrap_or_else(|| truncate(&text, 300));
+        return Err(format!("OpenAI API error ({}): {msg}", status.as_u16()));
+    }
+
+    let v: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("OpenAI response was not JSON: {e}"))?;
+    let out = v["choices"][0]["message"]["content"]
+        .as_str()
+        .ok_or_else(|| "OpenAI response contained no message content".to_string())?;
+    Ok(out.to_string())
+}
+
+/// Route an LLM call to OpenAI or Anthropic by model name. `key` is already the
+/// right provider's key (the caller picks it via `is_openai`).
+async fn call_llm(
+    key: &str,
+    model: &str,
+    effort: &str,
+    system: &str,
+    user: &str,
+    json_mode: bool,
+) -> Result<String, String> {
+    if is_openai(model) {
+        call_openai(key, model, effort, system, user, json_mode).await
+    } else {
+        call_claude(key, model, system, user).await
+    }
+}
+
 /// Strip markdown fences / preamble and slice to the outermost JSON braces.
 pub fn extract_json(raw: &str) -> String {
     let mut t = raw.trim();
@@ -531,6 +646,7 @@ fn post_process(mut r: CoachingReport) -> CoachingReport {
 pub async fn run_coaching(
     key: &str,
     model: &str,
+    effort: &str,
     ctx: &ContextInput,
     prospect: &str,
     date: &str,
@@ -539,7 +655,7 @@ pub async fn run_coaching(
     let system = build_system_prompt(ctx, prospect, date);
     let user = build_user(transcript, prospect, date, &ctx.company);
 
-    let raw = call_claude(key, model, &system, &user).await?;
+    let raw = call_llm(key, model, effort, &system, &user, true).await?;
     let report = match parse_report(&raw) {
         Ok(r) => r,
         Err(_) => {
@@ -549,9 +665,9 @@ pub async fn run_coaching(
                  schema, but it failed to parse. Return ONLY the corrected JSON object — no prose, no \
                  markdown fences.\n\nPrevious reply:\n{raw}"
             );
-            let raw2 = call_claude(key, model, &system, &repair).await?;
+            let raw2 = call_llm(key, model, effort, &system, &repair, true).await?;
             parse_report(&raw2)
-                .map_err(|e| format!("Claude returned invalid JSON even after a repair pass: {e}"))?
+                .map_err(|e| format!("the model returned invalid JSON even after a repair pass: {e}"))?
         }
     };
 
@@ -638,7 +754,12 @@ async fn fetch_site_text(url: &str) -> Result<String, String> {
 
 /// Fetch a company's website and have Claude extract a positioning profile.
 /// The URL fetch is the only outbound request beyond the Claude call.
-pub async fn parse_company_site(key: &str, model: &str, url: &str) -> Result<SiteContext, String> {
+pub async fn parse_company_site(
+    key: &str,
+    model: &str,
+    effort: &str,
+    url: &str,
+) -> Result<SiteContext, String> {
     let url = url.trim();
     if url.is_empty() {
         return Err("enter a website URL first".into());
@@ -652,7 +773,7 @@ pub async fn parse_company_site(key: &str, model: &str, url: &str) -> Result<Sit
     let user = format!(
         "Company website URL: {normalized}\n\nExtracted page text (may be truncated):\n{text}\n\nReturn ONLY the JSON object."
     );
-    let raw = call_claude(key, model, SITE_SYSTEM_TEMPLATE, &user).await?;
+    let raw = call_llm(key, model, effort, SITE_SYSTEM_TEMPLATE, &user, true).await?;
     let json = extract_json(&raw);
     serde_json::from_str::<SiteContext>(&json)
         .map_err(|e| format!("could not parse the model's positioning JSON: {e}"))

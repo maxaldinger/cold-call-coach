@@ -1805,45 +1805,76 @@
   font-style: italic;
 }
 
-/* ---- Cold-call pet (Tamagotchi) — pinned to the Coaching panel footer ---- */
-.pet {
+/* ---- Cold-call pet — a roaming blob habitat at the Coaching panel foot ---- */
+.pet-habitat {
   flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
+  position: relative;
+  height: 116px;
   border-top: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--bg-elev) 0%, var(--bg-elev-2) 100%);
+  overflow: hidden;
+}
+.pet-habitat.mood-thriving {
+  --band: var(--ok);
+}
+.pet-habitat.mood-content {
+  --band: #6ee7b7;
+}
+.pet-habitat.mood-peckish {
+  --band: var(--warn);
+}
+.pet-habitat.mood-hungry {
+  --band: var(--danger);
+}
+.pet-habitat.mood-napping {
+  --band: var(--text-faint);
+}
+.pet-habitat.mood-new {
+  --band: var(--accent);
+}
+
+/* happiness bar along the top edge */
+.habitat-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
   background: var(--bg-elev-2);
 }
-.blob {
-  flex: 0 0 auto;
-  display: block;
+.habitat-fill {
+  height: 100%;
+  width: 0;
+  background: var(--band, var(--accent));
+  transition: width 0.5s ease;
 }
-.pet:not(.mood-napping):not(.mood-new) .blob {
-  animation: pet-bob 2.6s ease-in-out infinite;
-}
-@keyframes pet-bob {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-2.5px);
-  }
-}
-.pet-mid {
-  flex: 1 1 auto;
-  min-width: 0;
+
+/* name / mood / stats overlaid in the corners */
+.habitat-info {
+  position: absolute;
+  top: 9px;
+  left: 12px;
+  right: 12px;
   display: flex;
-  flex-direction: column;
-  gap: 5px;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  pointer-events: none;
 }
-.pet-toprow {
+.habitat-left {
   display: flex;
   align-items: baseline;
   gap: 7px;
   font-size: 12px;
   min-width: 0;
+  pointer-events: auto;
+}
+.habitat-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  flex: 0 0 auto;
 }
 .pet-name {
   font-weight: 700;
@@ -1875,26 +1906,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.pet-bar {
-  height: 7px;
-  border-radius: 4px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  overflow: hidden;
-}
-.pet-fill {
-  height: 100%;
-  width: 0;
-  background: var(--band, var(--accent));
-  transition: width 0.4s ease;
-}
-.pet-stats {
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 1px;
-}
 .pet-happy {
   font-size: 18px;
   font-weight: 700;
@@ -1906,23 +1917,110 @@
   color: var(--text-faint);
   white-space: nowrap;
 }
-.pet.mood-thriving {
-  --band: var(--ok);
+
+/* the roaming critter — left + facing set inline; it transitions across the band */
+.critter {
+  position: absolute;
+  bottom: 9px;
+  width: 46px;
+  height: 50px;
 }
-.pet.mood-content {
-  --band: #6ee7b7;
+.critter-body {
+  position: absolute;
+  bottom: 7px;
+  left: 3px;
+  width: 40px;
+  height: 40px;
+  animation: critter-idle 2.8s ease-in-out infinite;
 }
-.pet.mood-peckish {
-  --band: var(--warn);
+.critter-body .blob {
+  width: 40px;
+  height: 40px;
+  display: block;
 }
-.pet.mood-hungry {
-  --band: var(--danger);
+.critter.is-moving .critter-body {
+  animation: critter-walk 0.42s ease-in-out infinite;
 }
-.pet.mood-napping {
-  --band: var(--text-faint);
+.pet-habitat.mood-thriving .critter.is-moving .critter-body {
+  animation-duration: 0.3s;
 }
-.pet.mood-new {
-  --band: var(--accent);
+.foot {
+  position: absolute;
+  bottom: 0;
+  width: 9px;
+  height: 6px;
+  border-radius: 50%;
+  background: #0e1117;
+  opacity: 0.85;
+}
+.foot-l {
+  left: 12px;
+}
+.foot-r {
+  right: 12px;
+}
+.critter.is-moving .foot-l {
+  animation: step 0.42s ease-in-out infinite;
+}
+.critter.is-moving .foot-r {
+  animation: step 0.42s ease-in-out infinite;
+  animation-delay: 0.21s;
+}
+.pet-habitat.mood-thriving .critter.is-moving .foot-l {
+  animation-duration: 0.3s;
+}
+.pet-habitat.mood-thriving .critter.is-moving .foot-r {
+  animation-duration: 0.3s;
+  animation-delay: 0.15s;
+}
+@keyframes critter-idle {
+  0%,
+  100% {
+    transform: translateY(0) scaleY(1);
+  }
+  50% {
+    transform: translateY(-1.5px) scaleY(1.03);
+  }
+}
+@keyframes critter-walk {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-4deg);
+  }
+  50% {
+    transform: translateY(-4px) rotate(4deg);
+  }
+}
+@keyframes step {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+.zzz {
+  position: absolute;
+  top: -8px;
+  right: -2px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-faint);
+  animation: zzz-float 2.4s ease-in-out infinite;
+}
+@keyframes zzz-float {
+  0% {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  40% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
 }
 
 /* working-hours inputs */

@@ -4,7 +4,7 @@
 // so it naps evenings/weekends instead of starving. Lives in a horizontal strip
 // at the bottom of the Coaching panel.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Database from "@tauri-apps/plugin-sql";
 
 const DB = "sqlite:coldcallcoach.db";
@@ -168,7 +168,7 @@ function BlobFace({ mood }: { mood: string }) {
       napping: "#6b7280",
       new: "#5b6472",
     } as Record<string, string>)[mood] ?? "#6ee7b7";
-  const sleeping = mood === "napping" || mood === "new";
+  const sleeping = mood === "napping"; // a fresh blob is awake and curious
   const mouth =
     ({
       thriving: "M12 22 Q20 31 28 22",
@@ -202,11 +202,38 @@ function BlobFace({ mood }: { mood: string }) {
 
 // ---- Component ---------------------------------------------------------------
 
+// How the critter roams, per mood: speed (% of the band per second) + how long
+// it pauses between strolls. Hungry = slow, short shuffles; thriving = sprints.
+function behavior(word: string): { speed: number; pauseMin: number; pauseMax: number } {
+  switch (word) {
+    case "thriving":
+      return { speed: 22, pauseMin: 150, pauseMax: 700 };
+    case "content":
+      return { speed: 13, pauseMin: 600, pauseMax: 1800 };
+    case "peckish":
+      return { speed: 7, pauseMin: 1200, pauseMax: 3000 };
+    case "hungry":
+      return { speed: 3.5, pauseMin: 2500, pauseMax: 6000 };
+    case "new":
+      return { speed: 5, pauseMin: 1500, pauseMax: 4000 }; // curious fresh blob, slow wander
+    default:
+      return { speed: 0, pauseMin: 0, pauseMax: 0 }; // napping: rest in place
+  }
+}
+
 export function Pet({ refreshKey }: { refreshKey: number }) {
   const [calls, setCalls] = useState<CallRow[] | null>(null);
   const [, setTick] = useState(0);
   const [name, setName] = useState(() => localStorage.getItem("ccc.petName") || "Pixel");
   const [editing, setEditing] = useState(false);
+
+  // Roaming state: where the critter is (left %), how long the stroll takes, the
+  // way it faces, and whether it's mid-walk (drives the walk animation).
+  const [pos, setPos] = useState(50);
+  const [durMs, setDurMs] = useState(0);
+  const [facing, setFacing] = useState(1);
+  const [moving, setMoving] = useState(false);
+  const posRef = useRef(50);
 
   // Reload call history on mount + whenever a new call is scored.
   useEffect(() => {
@@ -237,6 +264,44 @@ export function Pet({ refreshKey }: { refreshKey: number }) {
 
   const p = computePet(calls ?? [], new Date(), loadWorkHours());
   const m = mood(p);
+  const beh = behavior(m.word);
+
+  useEffect(() => {
+    posRef.current = pos;
+  }, [pos]);
+
+  // Walk to a random spot, pause, repeat — at the mood's pace. Rests when the
+  // pet is napping / new (speed 0).
+  useEffect(() => {
+    if (beh.speed <= 0) {
+      setMoving(false);
+      return;
+    }
+    let alive = true;
+    let t = 0;
+    const step = () => {
+      if (!alive) return;
+      const cur = posRef.current;
+      const target = 4 + Math.random() * 80; // % within the band
+      const durS = Math.max(0.4, Math.abs(target - cur) / beh.speed);
+      setFacing(target >= cur ? 1 : -1);
+      setDurMs(Math.round(durS * 1000));
+      setMoving(true);
+      setPos(target);
+      posRef.current = target;
+      t = window.setTimeout(() => {
+        if (!alive) return;
+        setMoving(false);
+        const pause = beh.pauseMin + Math.random() * (beh.pauseMax - beh.pauseMin);
+        t = window.setTimeout(step, pause);
+      }, durS * 1000);
+    };
+    t = window.setTimeout(step, 400);
+    return () => {
+      alive = false;
+      window.clearTimeout(t);
+    };
+  }, [beh.speed, beh.pauseMin, beh.pauseMax]);
 
   const saveName = (v: string) => {
     const n = v.trim() || "Pixel";
@@ -246,10 +311,13 @@ export function Pet({ refreshKey }: { refreshKey: number }) {
   };
 
   return (
-    <div className={`pet mood-${m.word}`} title={`${name} is ${m.word}`}>
-      <BlobFace mood={m.word} />
-      <div className="pet-mid">
-        <div className="pet-toprow">
+    <div className={`pet-habitat mood-${m.word}`}>
+      <div className="habitat-bar">
+        <div className="habitat-fill" style={{ width: `${p.isNew ? 0 : p.happiness}%` }} />
+      </div>
+
+      <div className="habitat-info">
+        <div className="habitat-left">
           {editing ? (
             <input
               className="pet-name-input"
@@ -268,17 +336,32 @@ export function Pet({ refreshKey }: { refreshKey: number }) {
           <span className="pet-mood">{m.word}</span>
           <span className="pet-nudge">· {m.nudge}</span>
         </div>
-        <div className="pet-bar">
-          <div className="pet-fill" style={{ width: `${p.isNew ? 0 : p.happiness}%` }} />
+        <div className="habitat-right">
+          <span className="pet-happy">{p.isNew ? "—" : p.happiness}</span>
+          <span className="pet-substats">
+            {p.callsToday} today
+            {p.avgScore !== null ? ` · avg ${p.avgScore}` : ""}
+            {p.lastAgo ? ` · ${p.lastAgo}` : ""}
+          </span>
         </div>
       </div>
-      <div className="pet-stats">
-        <span className="pet-happy">{p.isNew ? "—" : p.happiness}</span>
-        <span className="pet-substats">
-          {p.callsToday} today
-          {p.avgScore !== null ? ` · avg ${p.avgScore}` : ""}
-          {p.lastAgo ? ` · ${p.lastAgo}` : ""}
-        </span>
+
+      <div
+        className={`critter ${moving ? "is-moving" : ""}`}
+        style={{
+          left: `${pos}%`,
+          transform: `scaleX(${facing})`,
+          transitionProperty: "left",
+          transitionTimingFunction: "linear",
+          transitionDuration: `${durMs}ms`,
+        }}
+      >
+        {m.word === "napping" && <span className="zzz">z</span>}
+        <div className="critter-body">
+          <BlobFace mood={m.word} />
+        </div>
+        <span className="foot foot-l" />
+        <span className="foot foot-r" />
       </div>
     </div>
   );

@@ -12,6 +12,28 @@ interface SiteContext {
   objections: Objection[];
 }
 
+// Curated model presets for the scoring call. The backend routes by name
+// (gpt*/o* → OpenAI, claude-* → Anthropic), so any ID works — these are just the
+// sensible picks. "Custom…" reveals a free-text field for anything else.
+// Verified against OpenAI's lineup (June 2026): the fast/cheap tier is GPT-5.4
+// (mini/nano) — there is no gpt-5.5-mini/nano. gpt-5.4-mini is the default: fast,
+// cheap, and reliable on the strict-JSON rubric; nano is cheapest/fastest but
+// shakier on the harder bits (claim audit, MEDDPICC, voicemail detection).
+interface ModelPreset {
+  id: string;
+  label: string;
+  note: string;
+}
+const MODEL_PRESETS: ModelPreset[] = [
+  { id: "gpt-5.4-nano", label: "GPT-5.4 nano", note: "Fastest & cheapest — may need a retry on the strict JSON" },
+  { id: "gpt-5.4-mini", label: "GPT-5.4 mini  ·  recommended", note: "Fast, cheap, reliable for scoring — the default" },
+  { id: "gpt-5.4", label: "GPT-5.4", note: "Sharper judgment, a bit slower and pricier" },
+  { id: "gpt-5.5", label: "GPT-5.5", note: "Best coaching quality, slowest and priciest" },
+  { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5", note: "Anthropic — fast; needs your Anthropic key" },
+  { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", note: "Anthropic — high quality; needs your Anthropic key" },
+];
+const CUSTOM_MODEL = "__custom__";
+
 export function Settings({
   profile,
   onSaved,
@@ -37,6 +59,10 @@ export function Settings({
   const [openaiKeyPresent, setOpenaiKeyPresent] = useState(false);
   const [openaiKeyMsg, setOpenaiKeyMsg] = useState<string | null>(null);
   const [model, setModel] = useState(() => localStorage.getItem("ccc.model") || "gpt-5.4-mini");
+  // When the saved model isn't one of the presets, drop into free-text mode.
+  const [customModel, setCustomModel] = useState(
+    () => !MODEL_PRESETS.some((p) => p.id === (localStorage.getItem("ccc.model") || "gpt-5.4-mini")),
+  );
   const [effort, setEffort] = useState(() => localStorage.getItem("ccc.effort") || "low");
   const [aec, setAec] = useState(() => localStorage.getItem("ccc.aec") === "1");
 
@@ -75,6 +101,14 @@ export function Settings({
   const onModel = (m: string) => {
     setModel(m);
     localStorage.setItem("ccc.model", m);
+  };
+  const onModelSelect = (v: string) => {
+    if (v === CUSTOM_MODEL) {
+      setCustomModel(true); // keep the current id; let them type a new one
+    } else {
+      setCustomModel(false);
+      onModel(v);
+    }
   };
   const onAec = (v: boolean) => {
     setAec(v);
@@ -246,15 +280,34 @@ export function Settings({
 
         <Field
           label="Model"
-          hint="Type any model ID. GPT (gpt-5.4-mini, gpt-5.4-nano) routes to OpenAI; claude-* routes to Anthropic. gpt-5.4-mini is a fast, cheap, accurate default."
+          hint="Which model scores your calls. GPT routes to OpenAI, Claude to Anthropic — set the matching API key above. gpt-5.4-mini is the recommended default: fast, cheap, and reliable on the scoring rubric."
         >
-          <input
-            className="s-input"
-            value={model}
-            onChange={(e) => onModel(e.target.value)}
-            placeholder="gpt-5.4-mini"
-            spellCheck={false}
-          />
+          <select
+            className="device-select"
+            value={customModel ? CUSTOM_MODEL : model}
+            onChange={(e) => onModelSelect(e.target.value)}
+          >
+            {MODEL_PRESETS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}
+              </option>
+            ))}
+            <option value={CUSTOM_MODEL}>Custom…</option>
+          </select>
+          {customModel ? (
+            <input
+              className="s-input"
+              style={{ marginTop: 8 }}
+              value={model}
+              onChange={(e) => onModel(e.target.value)}
+              placeholder="gpt-5.4-mini"
+              spellCheck={false}
+            />
+          ) : (
+            <p className="field-hint" style={{ marginTop: 6, marginBottom: 0 }}>
+              {MODEL_PRESETS.find((p) => p.id === model)?.note}
+            </p>
+          )}
         </Field>
 
         <Field

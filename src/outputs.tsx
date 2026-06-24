@@ -358,33 +358,25 @@ const MEDDPICC_LABELS = [
   "Competition",
 ];
 
-function MeddpiccBlock({ items }: { items: MeddpiccItem[] }) {
+export function MeddpiccList({ items }: { items: MeddpiccItem[] }) {
   return (
-    <div className="report-block">
-      <h3 className="block-title">
-        MEDDPICC
-        <span className="block-sub">
-          Qualification snapshot — a cold call surfaces little, and that's expected
-        </span>
-      </h3>
-      <ul className="meddpicc-list">
-        {items.map((m, i) => {
-          const st = (m.status || "missing").toLowerCase();
-          return (
-            <li key={i} className={`meddpicc-item status-${st}`}>
-              <span className="meddpicc-letter">{m.letter}</span>
-              <div className="meddpicc-main">
-                <div className="meddpicc-toprow">
-                  <span className="meddpicc-label">{MEDDPICC_LABELS[i] ?? ""}</span>
-                  <span className={`meddpicc-status status-${st}`}>{m.status}</span>
-                </div>
-                {m.note && <p className="meddpicc-note">{m.note}</p>}
+    <ul className="meddpicc-list">
+      {items.map((m, i) => {
+        const st = (m.status || "missing").toLowerCase();
+        return (
+          <li key={i} className={`meddpicc-item status-${st}`}>
+            <span className="meddpicc-letter">{m.letter}</span>
+            <div className="meddpicc-main">
+              <div className="meddpicc-toprow">
+                <span className="meddpicc-label">{MEDDPICC_LABELS[i] ?? ""}</span>
+                <span className={`meddpicc-status status-${st}`}>{m.status}</span>
               </div>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
+              {m.note && <p className="meddpicc-note">{m.note}</p>}
+            </div>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -463,8 +455,6 @@ export function ReportView({ report }: { report: CoachingReport }) {
           <ClaimAuditView rows={report.claim_audit} byIdx={byIdx} />
         </div>
       )}
-
-      {report.meddpicc && report.meddpicc.length > 0 && <MeddpiccBlock items={report.meddpicc} />}
 
       {report.missed_opportunities.length > 0 && (
         <div className="report-block">

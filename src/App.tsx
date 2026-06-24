@@ -14,6 +14,7 @@ import {
   CoachingReport,
   CopyButton,
   Empty,
+  MeddpiccList,
   Panel,
   ReportView,
   localIsoDate,
@@ -535,49 +536,6 @@ export default function App() {
           )}
           {!recording && summary && <CaptureReport summary={summary} />}
 
-          {(recording || cleaning || transcript) && (
-            <section className="transcript">
-              <div className="transcript-head">
-                <span>{recording ? "Live transcript" : "Transcript"}</span>
-                <div className="transcript-head-right">
-                  <span className="transcript-note">
-                    {recording
-                      ? "live · speaker-labeled · in memory"
-                      : cleaning
-                      ? "re-transcribing (clean pass)…"
-                      : transcript
-                      ? "speaker-labeled · in memory"
-                      : ""}
-                  </span>
-                  {!recording && transcript && (
-                    <CopyButton text={transcript} label="Copy transcript" />
-                  )}
-                  {!recording && transcript && (
-                    <button
-                      className="ghost-btn clean-btn"
-                      onClick={cleanPass}
-                      disabled={cleaning}
-                      title={
-                        aecOn
-                          ? "Full per-source re-transcribe + cancel the prospect's bleed out of your mic"
-                          : "Full per-source re-transcribe for max quality"
-                      }
-                    >
-                      {cleaning ? "Re-transcribing…" : aecOn ? "↻ Clean + de-echo" : "↻ Clean pass"}
-                    </button>
-                  )}
-                </div>
-              </div>
-              <div className="transcript-body" ref={transcriptRef}>
-                {transcript ? (
-                  <LabeledTranscript text={transcript} />
-                ) : recording ? (
-                  <span className="t-empty">Listening…</span>
-                ) : null}
-              </div>
-            </section>
-          )}
-
           <section className="generate-bar">
             <div className="gen-field">
               <label className="field-label">Who did you call?</label>
@@ -613,24 +571,72 @@ export default function App() {
             </div>
           )}
 
-          <main className="report-area">
+          <main className="panels-3">
             <Panel
               title="Coaching"
-              subtitle="Post-call scorecard + how to do better next time"
-              action={report ? <CopyButton text={reportToText(report, prospect)} label="Copy report" /> : undefined}
+              subtitle="Scorecard + how to do better"
+              action={
+                report ? (
+                  <CopyButton text={reportToText(report, prospect)} label="Copy" />
+                ) : undefined
+              }
             >
               {report ? (
                 <ReportView report={report} />
               ) : (
                 <Empty>
-                  Record a cold call, stop, enter who you called, and hit{" "}
-                  <strong>Score this call</strong>. You'll get a scored breakdown of your opener,
-                  reason-for-call, value pitch (checked against what Bito actually does), objection
-                  handling, and whether you landed a next step — plus the single highest-leverage fix
-                  for next time.
+                  Record a call, stop, enter who you called, and hit <strong>Score this call</strong>{" "}
+                  — you'll get a scored breakdown (opener, value pitch vs. what Bito does, objection
+                  handling, next step) plus the single highest-leverage fix.
                 </Empty>
               )}
             </Panel>
+
+            <Panel title="MEDDPICC" subtitle="Qualification snapshot">
+              {report && report.meddpicc && report.meddpicc.length > 0 ? (
+                <MeddpiccList items={report.meddpicc} />
+              ) : (
+                <Empty>
+                  The MEDDPICC qualification snapshot appears here after you score a call. On a cold
+                  call most letters read “missing” — that's expected.
+                </Empty>
+              )}
+            </Panel>
+
+            <section className="panel">
+              <div className="panel-head">
+                <div>
+                  <h2>{recording ? "Live transcript" : "Transcript"}</h2>
+                  <p className="panel-sub">speaker-labeled · in memory</p>
+                </div>
+                {!recording && transcript && (
+                  <div className="panel-actions">
+                    <CopyButton text={transcript} label="Copy" />
+                    <button
+                      className="ghost-btn clean-btn"
+                      onClick={cleanPass}
+                      disabled={cleaning}
+                      title={
+                        aecOn
+                          ? "Full per-source re-transcribe + cancel the prospect's bleed out of your mic"
+                          : "Full per-source re-transcribe for max quality"
+                      }
+                    >
+                      {cleaning ? "Re-transcribing…" : aecOn ? "↻ De-echo" : "↻ Clean"}
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div className="panel-body transcript-body" ref={transcriptRef}>
+                {transcript ? (
+                  <LabeledTranscript text={transcript} />
+                ) : recording ? (
+                  <span className="t-empty">Listening…</span>
+                ) : (
+                  <Empty>Record a call to see the live, speaker-labeled transcript here.</Empty>
+                )}
+              </div>
+            </section>
           </main>
         </>
       )}

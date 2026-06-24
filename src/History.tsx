@@ -5,7 +5,15 @@
 import { useEffect, useRef, useState } from "react";
 import Database from "@tauri-apps/plugin-sql";
 import { ask } from "@tauri-apps/plugin-dialog";
-import { CoachingReport, CopyButton, Empty, Panel, ReportView, reportToText } from "./outputs";
+import {
+  CoachingReport,
+  CopyButton,
+  Empty,
+  MeddpiccList,
+  Panel,
+  ReportView,
+  reportToText,
+} from "./outputs";
 
 const DB = "sqlite:coldcallcoach.db";
 
@@ -274,6 +282,12 @@ export function History({ onClose }: { onClose: () => void }) {
               <Panel title="Coaching" subtitle="Read-only">
                 <ReportView report={detailReport} />
               </Panel>
+
+              {detailReport.meddpicc && detailReport.meddpicc.length > 0 && (
+                <Panel title="MEDDPICC" subtitle="Read-only">
+                  <MeddpiccList items={detailReport.meddpicc} />
+                </Panel>
+              )}
             </>
           )}
           {detailCall && !detailReport && !loadingDetail && !detailError && (

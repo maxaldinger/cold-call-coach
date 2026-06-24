@@ -1703,3 +1703,17 @@
   accent-color: var(--accent);
   cursor: pointer;
 }
+
+/* ---- Three side-by-side output panels: Coaching · MEDDPICC · Transcript ---- */
+.panels-3 {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  padding: 16px 22px 22px;
+  overflow: hidden;
+  min-height: 0;
+}
+.panels-3 .panel {
+  min-height: 0;
+}

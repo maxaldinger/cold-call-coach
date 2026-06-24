@@ -55,23 +55,35 @@ pub fn cancel_echo(mic: &[f32], reference: &[f32]) -> Vec<f32> {
 /// `reference`, via normalized cross-correlation over a high-energy reference
 /// window. Returns 0 when there is no usable correlation (e.g. no echo at all).
 fn estimate_delay(mic: &[f32], reference: &[f32], max_delay: usize) -> usize {
-    // ~3 s window, bounded for speed and clamped to both buffers.
-    let win = 48_000.min(reference.len()).min(mic.len());
-    if win == 0 {
+    let avail = reference.len().min(mic.len());
+    if avail < 4 {
         return 0;
     }
-    let start = strongest_window_start(reference, win);
-    // Don't index past the mic when shifting the window forward by the lag.
-    let max_d = max_delay.min(mic.len().saturating_sub(start + win));
-    if max_d == 0 {
+    // How far we can search, and a correlation window sized to leave room for the
+    // shift WITHIN the available samples. Without this headroom a short buffer
+    // (length ≈ window) would force the search range to 0 and the estimate to a
+    // useless 0 — which leaves the echo outside the filter span and INJECTS noise.
+    let search = max_delay.min(avail / 2);
+    let win = (avail - search).min(48_000); // ~3 s cap; smaller for short buffers
+    if win == 0 || search == 0 {
         return 0;
     }
+    // Pick the strongest reference window whose start still leaves `win + search`
+    // samples to slide across in the mic.
+    let max_start = mic
+        .len()
+        .saturating_sub(win + search)
+        .min(reference.len().saturating_sub(win));
+    let start = strongest_window_start(reference, win, max_start);
 
     // Reference energy in the window is constant across lags, so normalizing by
     // the mic energy at each lag is enough to pick the true alignment.
     let mut best_lag = 0usize;
     let mut best_score = f32::NEG_INFINITY;
-    for d in 0..=max_d {
+    for d in 0..=search {
+        if start + win + d > mic.len() {
+            break;
+        }
         let mut dot = 0.0f32;
         let mut mic_energy = 0.0f32;
         for i in 0..win {
@@ -93,16 +105,19 @@ fn estimate_delay(mic: &[f32], reference: &[f32], max_delay: usize) -> usize {
     best_lag
 }
 
-/// Coarse scan for the start of the highest-energy `win`-sample window in `x`.
-fn strongest_window_start(x: &[f32], win: usize) -> usize {
-    if x.len() <= win {
+/// Coarse scan for the start (in `0..=max_start`) of the highest-energy
+/// `win`-sample window in `x`. `max_start` caps the start so the caller keeps
+/// room to slide the window across the mic when searching for the lag.
+fn strongest_window_start(x: &[f32], win: usize, max_start: usize) -> usize {
+    if win == 0 || x.len() < win {
         return 0;
     }
+    let cap = max_start.min(x.len() - win);
     let step = (win / 4).max(1);
     let mut best_start = 0usize;
     let mut best_energy = -1.0f32;
     let mut s = 0usize;
-    while s + win <= x.len() {
+    while s <= cap {
         // Subsample for speed — we only need the roughly-loudest region.
         let mut e = 0.0f32;
         let mut i = 0usize;

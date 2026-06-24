@@ -33,7 +33,9 @@ export function Settings({
   const [keyInput, setKeyInput] = useState("");
   const [keyPresent, setKeyPresent] = useState(false);
   const [keyMsg, setKeyMsg] = useState<string | null>(null);
-  const [model, setModel] = useState(() => localStorage.getItem("ccc.model") || "claude-sonnet-4-6");
+  const [model, setModel] = useState(
+    () => localStorage.getItem("ccc.model") || "claude-haiku-4-5-20251001",
+  );
   const [aec, setAec] = useState(() => localStorage.getItem("ccc.aec") === "1");
 
   // Website auto-fill (Settings → drop a URL → LLM fills the positioning fields).
@@ -83,7 +85,7 @@ export function Settings({
     setFetching(true);
     setFetchMsg(null);
     try {
-      const model = localStorage.getItem("ccc.model") || "claude-sonnet-4-6";
+      const model = localStorage.getItem("ccc.model") || "claude-haiku-4-5-20251001";
       const s = await invoke<SiteContext>("parse_company_site", { url, model });
       // Fill what came back; keep existing values where the site gave nothing.
       setDraft((d) => ({
@@ -199,9 +201,13 @@ export function Settings({
           {keyMsg && <p className="field-hint key-msg">{keyMsg}</p>}
         </div>
 
-        <Field label="Model" hint="Default Sonnet 4.6. Bump to Opus 4.8 for max-quality coaching.">
+        <Field
+          label="Model"
+          hint="Default Haiku 4.5 (fastest scoring). Bump to Sonnet/Opus for deeper coaching at the cost of speed."
+        >
           <select className="device-select" value={model} onChange={(e) => onModel(e.target.value)}>
-            <option value="claude-sonnet-4-6">claude-sonnet-4-6 (default)</option>
+            <option value="claude-haiku-4-5-20251001">claude-haiku-4-5 (fastest · default)</option>
+            <option value="claude-sonnet-4-6">claude-sonnet-4-6 (balanced)</option>
             <option value="claude-opus-4-8">claude-opus-4-8 (max quality)</option>
           </select>
         </Field>

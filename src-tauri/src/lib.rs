@@ -310,7 +310,7 @@ async fn parse_company_site(
 ) -> Result<coaching::SiteContext, String> {
     let key = coaching::read_api_key()?;
     let model = if model.trim().is_empty() {
-        "claude-sonnet-4-6".to_string()
+        "claude-haiku-4-5-20251001".to_string()
     } else {
         model
     };
@@ -329,10 +329,8 @@ async fn analyze_call(
     date: String,
     model: String,
 ) -> Result<coaching::CoachingReport, String> {
+    // The prospect name is optional — the prompt falls back to "unknown".
     let prospect = prospect.trim().to_string();
-    if prospect.is_empty() {
-        return Err("enter who you called (prospect / account name) first".into());
-    }
     let transcript = {
         let slot = tx
             .last_transcript
@@ -346,7 +344,7 @@ async fn analyze_call(
     }
     let key = coaching::read_api_key()?;
     let model = if model.trim().is_empty() {
-        "claude-sonnet-4-6".to_string()
+        "claude-haiku-4-5-20251001".to_string()
     } else {
         model
     };

@@ -1804,6 +1804,71 @@
   color: var(--text-faint);
   font-style: italic;
 }
+/* the 8-question cheat-sheet */
+.reminder-qs {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.reminder-q {
+  display: flex;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 9px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+}
+.reminder-q.is-flagged {
+  border-color: #92400e;
+  background: #78350f22;
+}
+.reminder-num {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #0e1117;
+  border: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 700;
+  color: #a5b4fc;
+}
+.reminder-qmain {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.reminder-qtext {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text);
+}
+.reminder-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.reminder-tag {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+.reminder-tag.tag-flag {
+  color: #fcd34d;
+  border-color: #92400e;
+}
 
 /* ---- Cold-call pet — a roaming blob habitat at the Coaching panel foot ---- */
 .pet-habitat {
@@ -1921,83 +1986,53 @@
 /* the roaming critter — left + facing set inline; it transitions across the band */
 .critter {
   position: absolute;
-  bottom: 9px;
-  width: 46px;
-  height: 50px;
+  bottom: 10px;
+  width: 44px;
+  height: 44px;
 }
 .critter-body {
   position: absolute;
-  bottom: 7px;
-  left: 3px;
+  bottom: 0;
+  left: 2px;
   width: 40px;
   height: 40px;
-  animation: critter-idle 2.8s ease-in-out infinite;
+  transform-origin: 50% 100%;
+  animation: blob-idle 1.3s ease-in-out infinite;
 }
 .critter-body .blob {
   width: 40px;
   height: 40px;
   display: block;
 }
+/* one jump arc per hop (is-moving is on for exactly HOP_MS) */
 .critter.is-moving .critter-body {
-  animation: critter-walk 0.42s ease-in-out infinite;
+  animation: blob-hop 0.46s ease-out;
 }
-.pet-habitat.mood-thriving .critter.is-moving .critter-body {
-  animation-duration: 0.3s;
+/* a sleeping blob holds still */
+.pet-habitat.mood-napping .critter-body {
+  animation: none;
 }
-.foot {
-  position: absolute;
-  bottom: 0;
-  width: 9px;
-  height: 6px;
-  border-radius: 50%;
-  background: #0e1117;
-  opacity: 0.85;
-}
-.foot-l {
-  left: 12px;
-}
-.foot-r {
-  right: 12px;
-}
-.critter.is-moving .foot-l {
-  animation: step 0.42s ease-in-out infinite;
-}
-.critter.is-moving .foot-r {
-  animation: step 0.42s ease-in-out infinite;
-  animation-delay: 0.21s;
-}
-.pet-habitat.mood-thriving .critter.is-moving .foot-l {
-  animation-duration: 0.3s;
-}
-.pet-habitat.mood-thriving .critter.is-moving .foot-r {
-  animation-duration: 0.3s;
-  animation-delay: 0.15s;
-}
-@keyframes critter-idle {
+@keyframes blob-idle {
   0%,
   100% {
     transform: translateY(0) scaleY(1);
   }
   50% {
-    transform: translateY(-1.5px) scaleY(1.03);
+    transform: translateY(-3px) scaleY(1.05);
   }
 }
-@keyframes critter-walk {
-  0%,
+@keyframes blob-hop {
+  0% {
+    transform: translateY(0) scale(1.08, 0.84);
+  }
+  35% {
+    transform: translateY(-18px) scale(0.9, 1.14);
+  }
+  70% {
+    transform: translateY(-13px) scale(1, 1.04);
+  }
   100% {
-    transform: translateY(0) rotate(-4deg);
-  }
-  50% {
-    transform: translateY(-4px) rotate(4deg);
-  }
-}
-@keyframes step {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-4px);
+    transform: translateY(0) scale(1.1, 0.86);
   }
 }
 .zzz {

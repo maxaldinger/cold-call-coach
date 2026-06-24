@@ -202,24 +202,27 @@ function BlobFace({ mood }: { mood: string }) {
 
 // ---- Component ---------------------------------------------------------------
 
-// How the critter roams, per mood: speed (% of the band per second) + how long
-// it pauses between strolls. Hungry = slow, short shuffles; thriving = sprints.
-function behavior(word: string): { speed: number; pauseMin: number; pauseMax: number } {
+// How the critter hops around (old-school Tamagotchi), per mood: max hop
+// distance (% of the band) + how long it rests between hops. Hungry = small,
+// rare hops; thriving = big, frequent hops.
+function behavior(word: string): { hop: number; pauseMin: number; pauseMax: number } {
   switch (word) {
     case "thriving":
-      return { speed: 22, pauseMin: 150, pauseMax: 700 };
+      return { hop: 30, pauseMin: 150, pauseMax: 550 };
     case "content":
-      return { speed: 13, pauseMin: 600, pauseMax: 1800 };
+      return { hop: 24, pauseMin: 500, pauseMax: 1500 };
     case "peckish":
-      return { speed: 7, pauseMin: 1200, pauseMax: 3000 };
+      return { hop: 16, pauseMin: 1200, pauseMax: 3000 };
     case "hungry":
-      return { speed: 3.5, pauseMin: 2500, pauseMax: 6000 };
+      return { hop: 9, pauseMin: 2800, pauseMax: 6500 };
     case "new":
-      return { speed: 5, pauseMin: 1500, pauseMax: 4000 }; // curious fresh blob, slow wander
+      return { hop: 20, pauseMin: 1200, pauseMax: 3500 }; // curious fresh blob
     default:
-      return { speed: 0, pauseMin: 0, pauseMax: 0 }; // napping: rest in place
+      return { hop: 0, pauseMin: 0, pauseMax: 0 }; // napping: rest in place
   }
 }
+
+const HOP_MS = 460; // time for one hop (left transition + the jump arc)
 
 export function Pet({ refreshKey }: { refreshKey: number }) {
   const [calls, setCalls] = useState<CallRow[] | null>(null);
@@ -270,10 +273,9 @@ export function Pet({ refreshKey }: { refreshKey: number }) {
     posRef.current = pos;
   }, [pos]);
 
-  // Walk to a random spot, pause, repeat — at the mood's pace. Rests when the
-  // pet is napping / new (speed 0).
+  // Hop to a nearby spot, land, rest, repeat. Rests in place when napping (hop 0).
   useEffect(() => {
-    if (beh.speed <= 0) {
+    if (beh.hop <= 0) {
       setMoving(false);
       return;
     }
@@ -282,10 +284,11 @@ export function Pet({ refreshKey }: { refreshKey: number }) {
     const step = () => {
       if (!alive) return;
       const cur = posRef.current;
-      const target = 4 + Math.random() * 80; // % within the band
-      const durS = Math.max(0.4, Math.abs(target - cur) / beh.speed);
+      const dir = Math.random() < 0.5 ? -1 : 1;
+      let target = cur + dir * (0.5 + Math.random() * 0.5) * beh.hop;
+      target = Math.max(4, Math.min(84, target)); // stay in the band
       setFacing(target >= cur ? 1 : -1);
-      setDurMs(Math.round(durS * 1000));
+      setDurMs(HOP_MS);
       setMoving(true);
       setPos(target);
       posRef.current = target;
@@ -294,14 +297,14 @@ export function Pet({ refreshKey }: { refreshKey: number }) {
         setMoving(false);
         const pause = beh.pauseMin + Math.random() * (beh.pauseMax - beh.pauseMin);
         t = window.setTimeout(step, pause);
-      }, durS * 1000);
+      }, HOP_MS);
     };
     t = window.setTimeout(step, 400);
     return () => {
       alive = false;
       window.clearTimeout(t);
     };
-  }, [beh.speed, beh.pauseMin, beh.pauseMax]);
+  }, [beh.hop, beh.pauseMin, beh.pauseMax]);
 
   const saveName = (v: string) => {
     const n = v.trim() || "Pixel";
@@ -360,8 +363,6 @@ export function Pet({ refreshKey }: { refreshKey: number }) {
         <div className="critter-body">
           <BlobFace mood={m.word} />
         </div>
-        <span className="foot foot-l" />
-        <span className="foot foot-r" />
       </div>
     </div>
   );

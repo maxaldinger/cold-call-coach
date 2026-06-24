@@ -336,10 +336,6 @@ export default function App() {
   const runAnalyze = async () => {
     if (!profile) return;
     const who = prospect.trim();
-    if (!who) {
-      setAnalyzeError("Enter who you called first.");
-      return;
-    }
     if (!transcript.trim()) {
       setAnalyzeError("No transcript yet — record and stop a call first.");
       return;
@@ -358,7 +354,7 @@ export default function App() {
         objections: profile.objections,
         extra_context: profile.extra_context,
       };
-      const model = localStorage.getItem("ccc.model") || "claude-sonnet-4-6";
+      const model = localStorage.getItem("ccc.model") || "claude-haiku-4-5-20251001";
       const now = new Date();
       const humanDate = now.toLocaleDateString("en-US", {
         year: "numeric",
@@ -378,13 +374,13 @@ export default function App() {
       // Analysis succeeded — persist (call + report payload, NOT the transcript).
       // If saving fails, keep the report on screen and say so.
       try {
-        await persistReport(who, isoDate, model, out);
+        await persistReport(who || "Untitled call", isoDate, model, out);
       } catch (e) {
         setAnalyzeError(`Report ready but could not be saved to history: ${String(e)}`);
       }
       setPetRefresh((r) => r + 1); // feed the pet
       const scoreText = out.overall_score === null ? "no score (thin call)" : `${out.overall_score}/100`;
-      void notify("Cold Call Coach", `Coaching ready for ${who} — ${scoreText}`);
+      void notify("Cold Call Coach", `Coaching ready for ${who || "your call"} — ${scoreText}`);
     } catch (e) {
       setAnalyzeError(String(e));
     } finally {
@@ -543,7 +539,7 @@ export default function App() {
 
           <section className="generate-bar">
             <div className="gen-field">
-              <label className="field-label">Who did you call?</label>
+              <label className="field-label">Who did you call? (optional)</label>
               <input
                 className="s-input"
                 placeholder="e.g. Dana Lee, VP Eng at Acme"
@@ -555,13 +551,9 @@ export default function App() {
             <button
               className="generate-btn"
               onClick={runAnalyze}
-              disabled={analyzing || recording || !transcript.trim() || !prospect.trim()}
+              disabled={analyzing || recording || !transcript.trim()}
               title={
-                !transcript.trim()
-                  ? "Record and stop a call first"
-                  : !prospect.trim()
-                  ? "Enter who you called"
-                  : "Score the call and get coaching"
+                !transcript.trim() ? "Record and stop a call first" : "Score the call and get coaching"
               }
             >
               {analyzing ? "Scoring…" : "Score this call"}

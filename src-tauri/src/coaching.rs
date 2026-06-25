@@ -674,6 +674,114 @@ pub async fn run_coaching(
     Ok(post_process(report))
 }
 
+// ---------------------------------------------------------------------------
+// MEDDPICC qualification — a SEPARATE, on-demand pass. A cold call rarely has
+// real qualification signal, so this is a deliberate button, not auto-run with
+// the score. Honest "missing" is expected; nothing is fabricated.
+// ---------------------------------------------------------------------------
+
+/// The MEDDPICC snapshot returned by the on-demand scorer.
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct MeddpiccReport {
+    #[serde(default)]
+    pub meddpicc: Vec<MeddpiccItem>,
+    /// One-line overall qualification read for the call (optional).
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+const MEDDPICC_SYSTEM_TEMPLATE: &str = r#"You are a B2B sales qualification analyst scoring ONE cold call against the MEDDPICC framework for {company}. You output STRICT JSON ONLY — no prose, no explanations, no markdown code fences.
+
+Ground every judgement in the transcript. On a cold call most letters are usually "missing" — that is expected and HONEST; never invent qualification the conversation does not support. Use:
+- "covered": the transcript clearly establishes it (capture the gist in the note).
+- "weak": touched on but thin or only implied.
+- "missing": not established — say what to ask next call to get it.
+
+Return EXACTLY this JSON object, with EXACTLY 8 meddpicc entries in THIS order (M, E, D, D, P, I, C, C):
+{
+  "meddpicc": [
+    {"letter":"M","status":"covered|weak|missing","note":"Metrics — quantified pain/impact or a target metric"},
+    {"letter":"E","status":"covered|weak|missing","note":"Economic buyer — who controls the budget"},
+    {"letter":"D","status":"covered|weak|missing","note":"Decision criteria — what they'd judge a solution on"},
+    {"letter":"D","status":"covered|weak|missing","note":"Decision process — how a buying decision gets made"},
+    {"letter":"P","status":"covered|weak|missing","note":"Paper process — procurement/security/legal steps"},
+    {"letter":"I","status":"covered|weak|missing","note":"Identify pain — the concrete problem and its cost"},
+    {"letter":"C","status":"covered|weak|missing","note":"Champion — who would advocate internally"},
+    {"letter":"C","status":"covered|weak|missing","note":"Competition — incumbent tools or alternatives"}
+  ],
+  "note":"<one-sentence overall qualification read for THIS call>"
+}
+Each note is one or two sentences, specific to this call. Output only the JSON object."#;
+
+/// On-demand MEDDPICC pass over the transcript. One LLM call + one repair pass.
+pub async fn run_meddpicc(
+    key: &str,
+    model: &str,
+    effort: &str,
+    ctx: &ContextInput,
+    prospect: &str,
+    date: &str,
+    transcript: &str,
+) -> Result<MeddpiccReport, String> {
+    let prospect_disp = if prospect.trim().is_empty() { "unknown" } else { prospect.trim() };
+    let system = MEDDPICC_SYSTEM_TEMPLATE.replace("{company}", &ctx.company);
+    let user = format!(
+        "Prospect: {prospect_disp}\nDate: {date}\n\nLabeled cold-call transcript ([You] = the {} rep, [Prospect] = the person called):\n{transcript}\n\nReturn ONLY the JSON object.",
+        ctx.company
+    );
+    let raw = call_llm(key, model, effort, &system, &user, true).await?;
+    match serde_json::from_str::<MeddpiccReport>(&extract_json(&raw)) {
+        Ok(r) => Ok(r),
+        Err(_) => {
+            let repair = format!(
+                "Your previous reply was supposed to be a single valid JSON object matching the schema, \
+                 but it failed to parse. Return ONLY the corrected JSON object — no prose, no fences.\n\nPrevious reply:\n{raw}"
+            );
+            let raw2 = call_llm(key, model, effort, &system, &repair, true).await?;
+            serde_json::from_str::<MeddpiccReport>(&extract_json(&raw2))
+                .map_err(|e| format!("the model returned invalid MEDDPICC JSON even after a repair pass: {e}"))
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Transcript summary — a quick, factual recap (the Transcript panel button).
+// Plain text (markdown), not JSON.
+// ---------------------------------------------------------------------------
+
+const SUMMARY_SYSTEM: &str = r#"You summarize a single sales cold call for a {company} rep. Ground the summary ONLY in the transcript — never invent details, names, numbers, or commitments. [You] is the {company} rep; [Prospect] is the person they called.
+
+Write concise markdown, under ~150 words:
+- One short bold TL;DR line: what the call was and how it ended.
+- 3 to 6 bullets ("- "): what was pitched/discussed, the prospect's reactions and any objections, and pain or buying signals that surfaced.
+- A final "Next step: ..." line with the concrete agreed follow-up, or "Next step: none secured".
+
+If it was a voicemail or there was no real conversation, say that in one line instead of forcing the format. No preamble and no closing remarks — just the summary."#;
+
+/// On-demand factual summary of the transcript. Returns the markdown text.
+pub async fn run_summary(
+    key: &str,
+    model: &str,
+    effort: &str,
+    ctx: &ContextInput,
+    prospect: &str,
+    date: &str,
+    transcript: &str,
+) -> Result<String, String> {
+    let prospect_disp = if prospect.trim().is_empty() { "unknown" } else { prospect.trim() };
+    let system = SUMMARY_SYSTEM.replace("{company}", &ctx.company);
+    let user = format!(
+        "Prospect: {prospect_disp}\nDate: {date}\n\nLabeled cold-call transcript ([You] = the {} rep, [Prospect] = the person called):\n{transcript}\n\nWrite the summary now.",
+        ctx.company
+    );
+    let raw = call_llm(key, model, effort, &system, &user, false).await?;
+    let s = raw.trim().to_string();
+    if s.is_empty() {
+        return Err("the model returned an empty summary".into());
+    }
+    Ok(s)
+}
+
 fn truncate(s: &str, n: usize) -> String {
     if s.chars().count() <= n {
         s.to_string()

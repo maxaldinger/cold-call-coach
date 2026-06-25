@@ -1,11 +1,12 @@
 :root {
-  --bg: #0e1117;
-  --bg-elev: #161b24;
-  --bg-elev-2: #1c2330;
-  --border: #262d3a;
-  --text: #e6e9ef;
-  --text-dim: #9aa4b2;
-  --text-faint: #5d6675;
+  /* Dark mode — a HubSpot-style slate grey (not near-black). */
+  --bg: #15202b;
+  --bg-elev: #1b2935;
+  --bg-elev-2: #243340;
+  --border: #33424f;
+  --text: #e2e8f0;
+  --text-dim: #9aabbd;
+  --text-faint: #69788b;
   --accent: #6366f1;
   --accent-dim: #4f46e5;
   --danger: #ef4444;

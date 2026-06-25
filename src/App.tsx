@@ -15,6 +15,7 @@ import {
   CoachingReport,
   CopyButton,
   Empty,
+  MeddpiccItem,
   MeddpiccList,
   MeddpiccReminder,
   Panel,
@@ -146,13 +147,23 @@ export default function App() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const seededRef = useRef(false);
 
-  // Who was called (entered by the user, never inferred) + the coaching report.
-  const [prospect, setProspect] = useState("");
+  // Coaching report (scored from the Coaching panel). The prospect name is no
+  // longer collected in the UI — kept as "" so the prompt falls back to "unknown".
+  const [prospect] = useState("");
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
   const [report, setReport] = useState<CoachingReport | null>(null);
   // Bumped after a call is scored so the pet (bottom of Coaching) re-reads history.
   const [petRefresh, setPetRefresh] = useState(0);
+  // MEDDPICC is scored separately, on demand (a cold call rarely has real signal).
+  const [meddpicc, setMeddpicc] = useState<MeddpiccItem[] | null>(null);
+  const [meddNote, setMeddNote] = useState<string | null>(null);
+  const [meddLoading, setMeddLoading] = useState(false);
+  const [meddError, setMeddError] = useState<string | null>(null);
+  // On-demand transcript summary (Transcript panel).
+  const [summaryText, setSummaryText] = useState<string | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -295,6 +306,11 @@ export default function App() {
     setTranscript("");
     setReport(null);
     setAnalyzeError(null);
+    setMeddpicc(null);
+    setMeddNote(null);
+    setMeddError(null);
+    setSummaryText(null);
+    setSummaryError(null);
     // Optimistic: capture starts server-side immediately; the first-time model
     // load can take a couple seconds, so don't make the UI wait to feel live.
     setRecording(true);
@@ -336,6 +352,71 @@ export default function App() {
       setCaptureError(String(e));
     } finally {
       setCleaning(false);
+    }
+  };
+
+  // Shared LLM-call inputs. Non-secret config only — the key is read in Rust.
+  const buildContext = () =>
+    profile && {
+      company: profile.company,
+      rep_name: profile.rep_name,
+      value_oneliner: profile.value_oneliner,
+      ideal_opener: profile.ideal_opener,
+      catalog: profile.catalog,
+      personas: profile.personas,
+      objections: profile.objections,
+      extra_context: profile.extra_context,
+    };
+  const callMeta = () => ({
+    model: localStorage.getItem("ccc.model") || "gpt-5.4-mini",
+    effort: localStorage.getItem("ccc.effort") || "low",
+    humanDate: new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }),
+  });
+
+  // MEDDPICC — a separate, deliberate pass, scored from the MEDDPICC panel.
+  const runMeddpicc = async () => {
+    const ctx = buildContext();
+    if (!ctx || !transcript.trim()) return;
+    setMeddLoading(true);
+    setMeddError(null);
+    try {
+      const { model, effort, humanDate } = callMeta();
+      const res = await invoke<{ meddpicc: MeddpiccItem[]; note: string | null }>("score_meddpicc", {
+        context: ctx,
+        prospect: prospect.trim(),
+        date: humanDate,
+        model,
+        effort,
+      });
+      setMeddpicc(res.meddpicc ?? []);
+      setMeddNote(res.note ?? null);
+    } catch (e) {
+      setMeddError(String(e));
+    } finally {
+      setMeddLoading(false);
+    }
+  };
+
+  // A quick factual recap of the transcript — the Transcript panel's Summarize button.
+  const runSummary = async () => {
+    const ctx = buildContext();
+    if (!ctx || !transcript.trim()) return;
+    setSummaryLoading(true);
+    setSummaryError(null);
+    try {
+      const { model, effort, humanDate } = callMeta();
+      const text = await invoke<string>("summarize_transcript", {
+        context: ctx,
+        prospect: prospect.trim(),
+        date: humanDate,
+        model,
+        effort,
+      });
+      setSummaryText(text);
+    } catch (e) {
+      setSummaryError(String(e));
+    } finally {
+      setSummaryLoading(false);
     }
   };
 
@@ -555,28 +636,6 @@ export default function App() {
           )}
           {!recording && summary && <CaptureReport summary={summary} />}
 
-          <section className="generate-bar">
-            <div className="gen-field">
-              <label className="field-label">Who did you call? (optional)</label>
-              <input
-                className="s-input"
-                placeholder="e.g. Dana Lee, VP Eng at Acme"
-                value={prospect}
-                onChange={(e) => setProspect(e.target.value)}
-                disabled={analyzing}
-              />
-            </div>
-            <button
-              className="generate-btn"
-              onClick={runAnalyze}
-              disabled={analyzing || recording || !transcript.trim()}
-              title={
-                !transcript.trim() ? "Record and stop a call first" : "Score the call and get coaching"
-              }
-            >
-              {analyzing ? "Scoring…" : "Score this call"}
-            </button>
-          </section>
           {analyzeError && (
             <div className="error-banner">
               {analyzeError}
@@ -600,20 +659,50 @@ export default function App() {
               {report ? (
                 <ReportView report={report} />
               ) : (
-                <Empty>
-                  Record a call, stop, enter who you called, and hit <strong>Score this call</strong>{" "}
-                  — you'll get a scored breakdown (opener, value pitch vs. what Bito does, objection
-                  handling, next step) plus the single highest-leverage fix.
-                </Empty>
+                <div className="coaching-cta">
+                  <button
+                    className="generate-btn"
+                    onClick={runAnalyze}
+                    disabled={analyzing || recording || !transcript.trim()}
+                    title={
+                      !transcript.trim()
+                        ? "Record and stop a call first"
+                        : "Score the call and get coaching"
+                    }
+                  >
+                    {analyzing ? "Scoring…" : "Score this call"}
+                  </button>
+                  <Empty>
+                    Record a call, stop, then hit <strong>Score this call</strong> — you'll get a scored
+                    breakdown (opener, value pitch vs. what Bito does, objection handling, next step) plus
+                    the single highest-leverage fix.
+                  </Empty>
+                </div>
               )}
             </Panel>
 
             <Panel
               title="MEDDPICC"
-              subtitle={report ? "Qualification snapshot" : "What to gather on the call"}
+              subtitle={meddpicc ? "Qualification snapshot" : "What to gather on the call"}
+              action={
+                !recording && transcript.trim() ? (
+                  <button
+                    className="ghost-btn"
+                    onClick={runMeddpicc}
+                    disabled={meddLoading}
+                    title="Score this call against MEDDPICC"
+                  >
+                    {meddLoading ? "Scoring…" : meddpicc ? "↻ Re-score" : "Score MEDDPICC"}
+                  </button>
+                ) : undefined
+              }
             >
-              {report && report.meddpicc && report.meddpicc.length > 0 ? (
-                <MeddpiccList items={report.meddpicc} />
+              {meddError && <div className="error-banner">{meddError}</div>}
+              {meddpicc && meddpicc.length > 0 ? (
+                <>
+                  {meddNote && <p className="meddpicc-readout">{meddNote}</p>}
+                  <MeddpiccList items={meddpicc} />
+                </>
               ) : (
                 <MeddpiccReminder />
               )}
@@ -627,6 +716,14 @@ export default function App() {
                 </div>
                 {!recording && transcript && (
                   <div className="panel-actions">
+                    <button
+                      className="ghost-btn"
+                      onClick={runSummary}
+                      disabled={summaryLoading}
+                      title="Summarize this call"
+                    >
+                      {summaryLoading ? "Summarizing…" : "Summarize"}
+                    </button>
                     <CopyButton text={transcript} label="Copy" />
                     <button
                       className="ghost-btn clean-btn"
@@ -644,6 +741,16 @@ export default function App() {
                 )}
               </div>
               <div className="panel-body transcript-body" ref={transcriptRef}>
+                {summaryError && <div className="error-banner">{summaryError}</div>}
+                {summaryText && (
+                  <div className="transcript-summary">
+                    <div className="ts-head">
+                      <span className="ts-badge">Summary</span>
+                      <CopyButton text={summaryText} label="Copy" />
+                    </div>
+                    <div className="ts-body">{summaryText}</div>
+                  </div>
+                )}
                 {transcript ? (
                   <LabeledTranscript text={transcript} />
                 ) : recording ? (

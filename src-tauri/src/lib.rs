@@ -373,6 +373,79 @@ async fn analyze_call(
     coaching::run_coaching(&key, &model, &effort, &context, &prospect, &date, &transcript).await
 }
 
+/// On-demand MEDDPICC qualification pass over the in-memory transcript. Kept
+/// separate from scoring because a cold call rarely has real qualification
+/// signal — the UI triggers this from a button in the MEDDPICC panel.
+#[tauri::command]
+async fn score_meddpicc(
+    tx: tauri::State<'_, TranscriptionState>,
+    context: coaching::ContextInput,
+    prospect: String,
+    date: String,
+    model: String,
+    effort: String,
+) -> Result<coaching::MeddpiccReport, String> {
+    let prospect = prospect.trim().to_string();
+    let transcript = {
+        let slot = tx
+            .last_transcript
+            .lock()
+            .map_err(|_| "transcription state poisoned".to_string())?;
+        slot.clone()
+            .ok_or_else(|| "no transcript yet — record and stop a call first".to_string())?
+    };
+    if transcript.trim().is_empty() {
+        return Err("the transcript is empty — nothing to qualify from".into());
+    }
+    let model = if model.trim().is_empty() {
+        "gpt-5.4-mini".to_string()
+    } else {
+        model
+    };
+    let key = if coaching::is_openai(&model) {
+        coaching::read_openai_key()?
+    } else {
+        coaching::read_api_key()?
+    };
+    coaching::run_meddpicc(&key, &model, &effort, &context, &prospect, &date, &transcript).await
+}
+
+/// On-demand factual summary of the in-memory transcript (the Transcript panel's
+/// Summarize button). Returns markdown text.
+#[tauri::command]
+async fn summarize_transcript(
+    tx: tauri::State<'_, TranscriptionState>,
+    context: coaching::ContextInput,
+    prospect: String,
+    date: String,
+    model: String,
+    effort: String,
+) -> Result<String, String> {
+    let prospect = prospect.trim().to_string();
+    let transcript = {
+        let slot = tx
+            .last_transcript
+            .lock()
+            .map_err(|_| "transcription state poisoned".to_string())?;
+        slot.clone()
+            .ok_or_else(|| "no transcript yet — record and stop a call first".to_string())?
+    };
+    if transcript.trim().is_empty() {
+        return Err("the transcript is empty — nothing to summarize".into());
+    }
+    let model = if model.trim().is_empty() {
+        "gpt-5.4-mini".to_string()
+    } else {
+        model
+    };
+    let key = if coaching::is_openai(&model) {
+        coaching::read_openai_key()?
+    } else {
+        coaching::read_api_key()?
+    };
+    coaching::run_summary(&key, &model, &effort, &context, &prospect, &date, &transcript).await
+}
+
 /// Database migrations. Versioned and append-only — never edit a shipped
 /// migration, add a new one. The schema deliberately has NO transcript or
 /// raw-audio column anywhere: transcripts are ephemeral and live in memory
@@ -386,6 +459,9 @@ fn migrations() -> Vec<Migration> {
     }]
 }
 
+// The frontend bundle (including the slate dark theme + the always-light pet
+// "terrarium") is embedded at compile time by generate_context!, so each release
+// build re-embeds the latest `dist`.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Route whisper.cpp / ggml logs through the `log` crate; with no logger
@@ -417,6 +493,8 @@ pub fn run() {
             has_openai_key,
             parse_company_site,
             analyze_call,
+            score_meddpicc,
+            summarize_transcript,
             set_render_device,
             set_capture_device,
             capture_status

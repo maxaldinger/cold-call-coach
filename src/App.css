@@ -767,6 +767,49 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+/* Coaching panel empty-state CTA (the Score button now lives here) */
+.coaching-cta {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: flex-start;
+}
+/* MEDDPICC one-line overall read above the scorecard */
+.meddpicc-readout {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-dim);
+  border-left: 2px solid var(--accent);
+  padding-left: 10px;
+}
+/* On-demand transcript summary box */
+.transcript-summary {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+.transcript-summary .ts-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.transcript-summary .ts-badge {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+}
+.transcript-summary .ts-body {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text);
+  white-space: pre-wrap;
+}
 .gen-retry-note {
   margin-top: 4px;
   font-size: 11px;
@@ -1941,6 +1984,18 @@
 
 /* ---- Cold-call pet — a roaming blob habitat at the Coaching panel foot ---- */
 .pet-habitat {
+  /* The pet stays a white "terrarium" even in slate dark mode — scope light-mode
+     variables onto the habitat subtree so it overrides :root for its descendants. */
+  --bg: #f6f7f9;
+  --bg-elev: #ffffff;
+  --bg-elev-2: #eef0f4;
+  --border: #d6dbe3;
+  --text: #1a1f29;
+  --text-dim: #4b5563;
+  --text-faint: #8b93a1;
+  --danger: #dc2626;
+  --ok: #16a34a;
+  --warn: #d97706;
   flex: 0 0 auto;
   position: relative;
   height: 116px;

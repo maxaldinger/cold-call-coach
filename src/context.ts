@@ -66,8 +66,12 @@ export const BITO_SEED: Omit<ContextProfile, "id"> = {
     {
       name: "AI Architect",
       description:
-        "Codebase-intelligence server (runs locally or in Docker) that builds a knowledge graph of the codebase grounded in code, commits, issues, docs, and Slack. Available via MCP. The core wedge — nearly every capability ladders back to it.",
-      proof_points: [],
+        "Codebase-intelligence context layer (runs locally or in Docker) that builds a semantic + syntactic knowledge graph of the codebase — grounded in code, commits, issues, docs, and Slack — across repos and services. Available via MCP. It augments your existing setup (same model, same IDE) rather than replacing anything: by grounding AI coding agents in how your system actually works, they produce more production-ready output with less wasted token spend. The core wedge — nearly every capability ladders back to it.",
+      proof_points: [
+        "Grounds AI coding agents so they produce production-ready, higher-quality output",
+        "Cuts wasted token spend from agents flailing without codebase context",
+        "Augments your existing model + IDE — doesn't replace them",
+      ],
     },
     {
       name: "Security posture",

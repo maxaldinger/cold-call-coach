@@ -570,15 +570,20 @@ fn capture_run(
     let mut queue: VecDeque<u8> = VecDeque::new();
     let poll = Duration::from_millis(setup.poll_ms);
     let mut run_err: Option<String> = None;
+    let mut err_streak: u32 = 0;
 
     while !stop.load(Ordering::Acquire) {
-        // Drain every packet currently available from the capture client.
+        // Drain every packet currently available from the capture client. A
+        // transient read error (a momentary buffer glitch under load) must NOT kill
+        // capture for the rest of the call — skip this cycle and keep polling; only
+        // give up after a sustained failure (~2 s of solid errors).
+        let mut cycle_err: Option<String> = None;
         loop {
             let before = queue.len();
             match setup.capture_client.read_from_device_to_deque(&mut queue) {
                 Ok(_) => {}
                 Err(e) => {
-                    run_err = Some(e.to_string());
+                    cycle_err = Some(e.to_string());
                     break;
                 }
             }
@@ -586,9 +591,16 @@ fn capture_run(
                 break;
             }
         }
-        if run_err.is_some() {
-            break;
+        if let Some(e) = cycle_err {
+            err_streak += 1;
+            if err_streak > 400 {
+                run_err = Some(e);
+                break;
+            }
+            thread::sleep(poll);
+            continue;
         }
+        err_streak = 0;
 
         if queue.len() >= block_align {
             let mut mono = Vec::with_capacity(queue.len() / block_align + 1);
@@ -666,9 +678,14 @@ fn finish_open(device: wasapi::Device, label: &str) -> Result<SysSetup, String> 
     let (def_time, _min_time) = audio_client.get_device_period().map_err(|e| e.to_string())?;
     // Shared mode, Direction::Capture, polling (loopback can't use event timing;
     // we poll the mic the same way so one loop serves both).
+    // Give the capture buffer real headroom (≥200 ms; def_time is only ~10 ms).
+    // With two WASAPI workers polling + locking, a delayed poll on the tiny default
+    // buffer would overflow and stall the stream. We still poll every few ms, so
+    // the extra size is pure slack, not latency. (1 hns = 100 ns → 2_000_000 = 200 ms.)
+    let buffer_hns = def_time.max(2_000_000);
     let mode = StreamMode::PollingShared {
         autoconvert: false,
-        buffer_duration_hns: def_time,
+        buffer_duration_hns: buffer_hns,
     };
     audio_client
         .initialize_client(&format, &Direction::Capture, &mode)

@@ -59,7 +59,11 @@ impl Transcriber {
 
     /// Transcribe a 16 kHz mono buffer into segments with timestamps. English,
     /// no translation. Non-speech annotation segments are dropped.
-    pub fn transcribe_segments(&self, samples_16k_mono: &[f32]) -> Result<Vec<Segment>, String> {
+    pub fn transcribe_segments(
+        &self,
+        samples_16k_mono: &[f32],
+        initial_prompt: Option<&str>,
+    ) -> Result<Vec<Segment>, String> {
         if samples_16k_mono.is_empty() {
             return Ok(Vec::new());
         }
@@ -78,6 +82,15 @@ impl Transcriber {
         params.set_print_progress(false);
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
+        // Bias the decoder toward the rep's company + product vocabulary so brand
+        // terms and jargon transcribe correctly (e.g. "Bito", "AI Architect",
+        // "pull request") instead of being guessed phonetically.
+        if let Some(p) = initial_prompt {
+            let p = p.trim();
+            if !p.is_empty() {
+                params.set_initial_prompt(p);
+            }
+        }
 
         state
             .full(params, samples_16k_mono)
@@ -102,7 +115,7 @@ impl Transcriber {
     /// Transcribe a 16 kHz mono buffer to a single concatenated string. Used by
     /// the live ticker (no speaker labels there).
     pub fn transcribe(&self, samples_16k_mono: &[f32]) -> Result<String, String> {
-        let segments = self.transcribe_segments(samples_16k_mono)?;
+        let segments = self.transcribe_segments(samples_16k_mono, None)?;
         Ok(segments
             .iter()
             .map(|s| s.text.as_str())
@@ -242,7 +255,12 @@ impl Drop for LiveSession {
 /// Start the two per-source live workers. `on_update(merged_labeled_text,
 /// recording)` fires whenever either worker advances (decoupled from Tauri so
 /// this is testable headlessly).
-pub fn start_live<F>(tap: AudioTap, transcriber: Arc<Transcriber>, on_update: F) -> LiveSession
+pub fn start_live<F>(
+    tap: AudioTap,
+    transcriber: Arc<Transcriber>,
+    initial_prompt: Option<String>,
+    on_update: F,
+) -> LiveSession
 where
     F: Fn(&str, bool) + Send + Sync + 'static,
 {
@@ -267,8 +285,9 @@ where
     {
         let tap = tap.clone();
         let (tr, sh, st, em) = (transcriber.clone(), shared.clone(), stop.clone(), emit.clone());
+        let ip = initial_prompt.clone();
         threads.push(thread::spawn(move || {
-            source_loop(Label::Ae, tr, st, sh, em, move |from| {
+            source_loop(Label::Ae, tr, ip, st, sh, em, move |from| {
                 let d = tap.snapshot_mic_since(from);
                 (d.samples, d.rate)
             });
@@ -277,8 +296,9 @@ where
     {
         let tap = tap.clone();
         let (tr, sh, st, em) = (transcriber.clone(), shared.clone(), stop.clone(), emit.clone());
+        let ip = initial_prompt.clone();
         threads.push(thread::spawn(move || {
-            source_loop(Label::Prospect, tr, st, sh, em, move |from| {
+            source_loop(Label::Prospect, tr, ip, st, sh, em, move |from| {
                 let d = tap.snapshot_sys_since(from);
                 (d.samples, d.rate)
             });
@@ -297,6 +317,7 @@ where
 fn source_loop<P>(
     label: Label,
     transcriber: Arc<Transcriber>,
+    initial_prompt: Option<String>,
     stop: Arc<AtomicBool>,
     shared: Arc<Mutex<Merged>>,
     emit: Arc<dyn Fn() + Send + Sync>,
@@ -321,7 +342,7 @@ fn source_loop<P>(
         let uncommitted = buf.len().saturating_sub(commit_idx);
         if uncommitted >= MIN_PARTIAL_SAMPLES && buf.len() > last_len {
             let segs = transcriber
-                .transcribe_segments(&buf[commit_idx..])
+                .transcribe_segments(&buf[commit_idx..], initial_prompt.as_deref())
                 .unwrap_or_default();
             // Window-relative timestamps -> absolute (offset by commit point).
             let offset_cs = (commit_idx as i64) * 100 / (TARGET_RATE as i64);
@@ -421,12 +442,13 @@ pub fn clean_retranscribe(
     mic_16k: &[f32],
     sys_16k: &[f32],
     prospect_spans: &[SpeakerSpan],
+    initial_prompt: Option<&str>,
 ) -> Result<String, String> {
     let you = transcriber
-        .transcribe_segments(mic_16k)
+        .transcribe_segments(mic_16k, initial_prompt)
         .map_err(|e| format!("you (mic) clean pass failed: {e}"))?;
     let prospect = transcriber
-        .transcribe_segments(sys_16k)
+        .transcribe_segments(sys_16k, initial_prompt)
         .map_err(|e| format!("prospect (system) clean pass failed: {e}"))?;
 
     let n_speakers = prospect_spans

@@ -427,9 +427,36 @@ const SPK = [
   { t: 18, l: 44, d: 1250 },
 ];
 
+// Festive bits for the scored-call confetti burst (tier 2). A deterministic
+// upward fan — dx/dy/rot are CSS custom props the burst animation reads.
+const CONFETTI_COLORS = ["#fb7185", "#fbbf24", "#34d399", "#60a5fa", "#a78bfa", "#f472b6"];
+const CONFETTI = Array.from({ length: 16 }, (_, i) => {
+  const ang = ((-150 + (i / 15) * 120) * Math.PI) / 180;
+  const dist = 42 + (i % 5) * 11;
+  return {
+    dx: Math.round(Math.cos(ang) * dist),
+    dy: Math.round(Math.sin(ang) * dist - 12),
+    rot: (i % 2 ? 1 : -1) * (150 + (i % 4) * 80),
+    delay: (i % 6) * 25,
+    color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+  };
+});
+
 // ---- Component ---------------------------------------------------------------
 
-export function Pet({ refreshKey }: { refreshKey: number }) {
+export function Pet({
+  refreshKey,
+  celebrateSignal = 0,
+  celebrateTier = 1,
+}: {
+  refreshKey: number;
+  /** Bumped to fire a celebration — separate from refreshKey (which reloads the
+   *  call history). Lets the on-press spin+eat fire before the score returns. */
+  celebrateSignal?: number;
+  /** Tier of the latest celebration: 0 = spin (logged dial), 1 = spin + eats
+   *  (scored call, fired on press), 2 = backflip + confetti (a >50 score). */
+  celebrateTier?: number;
+}) {
   const [calls, setCalls] = useState<CallRow[] | null>(null);
   const [, setTick] = useState(0);
   const [name, setName] = useState(() => localStorage.getItem("ccc.petName") || "Pixel");
@@ -446,10 +473,17 @@ export function Pet({ refreshKey }: { refreshKey: number }) {
   // Liveliness: blink, glance, the eating beat, level beats, and the messy pen.
   const [blinking, setBlinking] = useState(false);
   const [look, setLook] = useState(0);
-  const [eating, setEating] = useState(false);
+  // Celebration tier currently animating (0/1/2), or null. Stacks: spin (all) +
+  // eat (>=1) + confetti & backflip (>=2). celRef lets the roam loop hold still.
+  const [cel, setCel] = useState<number | null>(null);
+  const celRef = useRef<number | null>(null);
+  // The ball Gers chases + nudges around the pen during the "playing" mood.
+  const [ballPos, setBallPos] = useState(66);
+  const [ballSpin, setBallSpin] = useState(0);
+  const ballPosRef = useRef(66);
   const [poops, setPoops] = useState<Poop[]>(loadPoops);
   const poopId = useRef(poops.reduce((m, p) => Math.max(m, p.id), 0) + 1);
-  const prevRefresh = useRef(refreshKey);
+  const prevCel = useRef(celebrateSignal);
   const prevRank = useRef<number | null>(null);
   const [beat, setBeat] = useState<"up" | "down" | null>(null);
 
@@ -482,8 +516,7 @@ export function Pet({ refreshKey }: { refreshKey: number }) {
 
   const p = computePet(calls ?? [], new Date(), loadWorkHours());
   const m = mood(p);
-  const beh = behavior(m.word);
-  const isHungry = m.word === "hungry" && !moving && !eating;
+  const isHungry = m.word === "hungry" && !moving && cel === null;
 
   // How many piles the pen "should" have right now, from how starved he is.
   const poopTarget = p.isNew
@@ -503,7 +536,9 @@ export function Pet({ refreshKey }: { refreshKey: number }) {
 
   // Hop to a nearby spot, land, rest, repeat. Holds still when napping/dead (hop 0).
   useEffect(() => {
-    if (beh.hop <= 0) {
+    const b = behavior(m.word);
+    const playing = m.word === "playing";
+    if (b.hop <= 0 && !playing) {
       setMoving(false);
       return;
     }
@@ -511,28 +546,64 @@ export function Pet({ refreshKey }: { refreshKey: number }) {
     let t = 0;
     const step = () => {
       if (!alive) return;
+      // Hold still mid-celebration so the spin / backflip reads cleanly.
+      if (celRef.current !== null) {
+        t = window.setTimeout(step, 300);
+        return;
+      }
       const cur = posRef.current;
-      const dir = Math.random() < 0.5 ? -1 : 1;
-      let target = cur + dir * (0.5 + Math.random() * 0.5) * beh.hop;
-      target = Math.max(4, Math.min(84, target)); // stay in the band
-      setFacing(target >= cur ? 1 : -1);
-      setDurMs(HOP_MS);
-      setMoving(true);
-      setPos(target);
-      posRef.current = target;
-      t = window.setTimeout(() => {
-        if (!alive) return;
-        setMoving(false);
-        const pause = beh.pauseMin + Math.random() * (beh.pauseMax - beh.pauseMin);
-        t = window.setTimeout(step, pause);
-      }, HOP_MS);
+      if (playing) {
+        // Chase the ball; when we reach it, boot it onward (bounces off the walls).
+        const bp = ballPosRef.current;
+        let dir = bp >= cur ? 1 : -1;
+        let target: number;
+        if (Math.abs(bp - cur) < 11) {
+          let nx = bp + dir * (16 + Math.random() * 16);
+          if (nx > 86 || nx < 10) {
+            dir = -dir;
+            nx = bp + dir * (16 + Math.random() * 16);
+          }
+          nx = Math.max(10, Math.min(86, nx));
+          ballPosRef.current = nx;
+          setBallPos(nx);
+          setBallSpin((s) => s + dir * 420);
+          target = Math.max(4, Math.min(84, cur + dir * 8));
+        } else {
+          target = Math.max(4, Math.min(84, cur + dir * (10 + Math.random() * 8)));
+        }
+        setFacing(dir);
+        setDurMs(HOP_MS);
+        setMoving(true);
+        setPos(target);
+        posRef.current = target;
+        t = window.setTimeout(() => {
+          if (!alive) return;
+          setMoving(false);
+          t = window.setTimeout(step, 520 + Math.random() * 260);
+        }, HOP_MS);
+      } else {
+        const dir = Math.random() < 0.5 ? -1 : 1;
+        let target = cur + dir * (0.5 + Math.random() * 0.5) * b.hop;
+        target = Math.max(4, Math.min(84, target)); // stay in the band
+        setFacing(target >= cur ? 1 : -1);
+        setDurMs(HOP_MS);
+        setMoving(true);
+        setPos(target);
+        posRef.current = target;
+        t = window.setTimeout(() => {
+          if (!alive) return;
+          setMoving(false);
+          const pause = b.pauseMin + Math.random() * (b.pauseMax - b.pauseMin);
+          t = window.setTimeout(step, pause);
+        }, HOP_MS);
+      }
     };
     t = window.setTimeout(step, 400);
     return () => {
       alive = false;
       window.clearTimeout(t);
     };
-  }, [beh.hop, beh.pauseMin, beh.pauseMax]);
+  }, [m.word]);
 
   // Blink on a random cadence (not while asleep/dead — eyes are already shut/X'd).
   useEffect(() => {
@@ -586,15 +657,20 @@ export function Pet({ refreshKey }: { refreshKey: number }) {
     };
   }, [p.sleeping, m.word]);
 
-  // A call was just scored → he eats (chomp + morsel). Guarded so it never fires
-  // on first mount. The pen pick-up follows naturally as happiness rises below.
+  // A dial event happened → celebrate at the given tier (spin / + eat / + confetti
+  // & backflip). Guarded so it never fires on first mount.
   useEffect(() => {
-    if (refreshKey === prevRefresh.current) return;
-    prevRefresh.current = refreshKey;
-    setEating(true);
-    const t = window.setTimeout(() => setEating(false), 1300);
+    if (celebrateSignal === prevCel.current) return;
+    prevCel.current = celebrateSignal;
+    const tier = celebrateTier;
+    setCel(tier);
+    celRef.current = tier;
+    const t = window.setTimeout(() => {
+      setCel(null);
+      celRef.current = null;
+    }, 1700);
     return () => window.clearTimeout(t);
-  }, [refreshKey]);
+  }, [celebrateSignal]);
 
   // Reconcile the pen toward the hunger-driven target — only during work hours, so
   // a messy pen stays put overnight and gets cleaned at the next morning's reset.
@@ -706,12 +782,12 @@ export function Pet({ refreshKey }: { refreshKey: number }) {
       {poops.map((pp) => (
         <FloorPoop key={pp.id} x={pp.x} swept={!!pp.swept} />
       ))}
-      {!eating && (m.word === "dead" || (!p.sleeping && activePoops.length >= 2)) && (
+      {cel === null && (m.word === "dead" || (!p.sleeping && activePoops.length >= 2)) && (
         <div className="fly" style={{ left: `${activePoops[0]?.x ?? pos}%` }} aria-hidden="true">
           <span />
         </div>
       )}
-      {!eating && (m.word === "dead" || (!p.sleeping && activePoops.length >= 3)) && (
+      {cel === null && (m.word === "dead" || (!p.sleeping && activePoops.length >= 3)) && (
         <div
           className="fly"
           style={{ left: `${activePoops[activePoops.length - 1]?.x ?? pos + 6}%`, animationDelay: "700ms" }}
@@ -721,10 +797,20 @@ export function Pet({ refreshKey }: { refreshKey: number }) {
         </div>
       )}
 
+      {m.word === "playing" && (
+        <div
+          className="play-ball"
+          style={{ left: `${ballPos}%`, transform: `rotate(${ballSpin}deg)` }}
+          aria-hidden="true"
+        >
+          <ToyBall />
+        </div>
+      )}
+
       <div
-        className={`critter ${moving ? "is-moving" : ""} ${eating ? "is-eating" : ""} ${
-          isHungry ? "is-hungry" : ""
-        } ${beat ? `beat-${beat}` : ""}`}
+        className={`critter ${moving ? "is-moving" : ""} ${
+          cel === null ? "" : cel >= 2 ? "cel-flip" : "cel-spin"
+        } ${isHungry ? "is-hungry" : ""} ${beat ? `beat-${beat}` : ""}`}
         style={{
           left: `${pos}%`,
           transitionProperty: "left",
@@ -774,11 +860,6 @@ export function Pet({ refreshKey }: { refreshKey: number }) {
             </span>
           </div>
         )}
-        {m.word === "playing" && (
-          <div className="toy" aria-hidden="true">
-            <ToyBall />
-          </div>
-        )}
         {m.word === "hungry" && (
           <div className="sweat" aria-hidden="true">
             <SweatDrop />
@@ -789,12 +870,33 @@ export function Pet({ refreshKey }: { refreshKey: number }) {
             <ThoughtBowl />
           </div>
         )}
-        {eating && (
+        {cel !== null && (
           <>
-            <div className="fed-bubble">yum! +1 dial</div>
-            <div className="morsel" aria-hidden="true">
-              <Morsel />
+            <div className="fed-bubble">
+              {cel >= 2 ? "great call!" : cel === 1 ? "yum! +1 dial" : "+1 dial"}
             </div>
+            {cel === 1 && (
+              <div className="morsel" aria-hidden="true">
+                <Morsel />
+              </div>
+            )}
+            {cel >= 2 && (
+              <div className="confetti" aria-hidden="true">
+                {CONFETTI.map((c, i) => (
+                  <span
+                    key={i}
+                    className="confetti-bit"
+                    style={cssVars({
+                      "--dx": `${c.dx}px`,
+                      "--dy": `${c.dy}px`,
+                      "--rot": `${c.rot}deg`,
+                      animationDelay: `${c.delay}ms`,
+                      background: c.color,
+                    })}
+                  />
+                ))}
+              </div>
+            )}
           </>
         )}
 

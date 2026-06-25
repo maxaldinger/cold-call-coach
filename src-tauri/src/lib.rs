@@ -35,6 +35,10 @@ struct TranscriptionState {
     /// Loaded once and reused: the offline speaker-diarization pipeline used in
     /// the clean pass to split the prospect side into Prospect 1/2/3.
     diarizer: Mutex<Option<Arc<diarize::Diarizer>>>,
+    /// Whisper initial-prompt vocabulary (company + rep + product/jargon terms) so
+    /// brand terms transcribe correctly. Set at begin_recording; the clean pass
+    /// reuses it.
+    vocab: Mutex<Option<String>>,
 }
 
 #[derive(Serialize, Clone)]
@@ -128,6 +132,7 @@ fn begin_recording(
     audio: tauri::State<'_, AudioState>,
     tx: tauri::State<'_, TranscriptionState>,
     app: AppHandle,
+    vocab: Option<String>,
 ) -> Result<(), String> {
     // Start capture immediately (record from t=0) and grab a read tap.
     let tap = {
@@ -157,8 +162,13 @@ fn begin_recording(
 
     // Spin up the two per-source live workers; forward the merged labeled stream
     // to the UI as `transcript` events.
+    // Remember this session's vocabulary so the on-demand clean pass reuses it.
+    *tx.vocab
+        .lock()
+        .map_err(|_| "transcription state poisoned".to_string())? = vocab.clone();
+
     let app_emit = app.clone();
-    let live = transcribe::start_live(tap, transcriber, move |text, recording| {
+    let live = transcribe::start_live(tap, transcriber, vocab, move |text, recording| {
         let _ = app_emit.emit(
             "transcript",
             TranscriptUpdate {
@@ -310,7 +320,13 @@ fn clean_retranscribe(
         Ok(d) => d.diarize(&sys).unwrap_or_default(),
         Err(_) => Vec::new(),
     };
-    let transcript = transcribe::clean_retranscribe(&transcriber, &mic_proc, &sys, &spans)?;
+    let vocab = tx
+        .vocab
+        .lock()
+        .map_err(|_| "transcription state poisoned".to_string())?
+        .clone();
+    let transcript =
+        transcribe::clean_retranscribe(&transcriber, &mic_proc, &sys, &spans, vocab.as_deref())?;
     *tx.last_transcript
         .lock()
         .map_err(|_| "transcription state poisoned".to_string())? = Some(transcript.clone());
@@ -489,8 +505,8 @@ fn migrations() -> Vec<Migration> {
 }
 
 // The frontend bundle (slate theme, always-light pet "terrarium", quick dial
-// logger, etc.) is embedded at compile time by generate_context!, so each release
-// build re-embeds the latest `dist`.
+// logger, ball-play + tiered scored-call celebrations, etc.) is embedded at compile
+// time by generate_context!, so each release build re-embeds the latest `dist`.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Route whisper.cpp / ggml logs through the `log` crate; with no logger

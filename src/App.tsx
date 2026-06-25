@@ -116,6 +116,31 @@ function fmtTime(secs: number): string {
   return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 }
 
+// Vocabulary hint for the transcriber (whisper "initial prompt") — the company,
+// the rep's name, the catalog capability names, and common dev/sales jargon — so
+// brand terms and jargon transcribe correctly instead of being guessed by sound
+// (e.g. "Bito" not "Bitto"). Set your name in Settings to help it spell that too.
+function buildVocab(p: ContextProfile | null): string {
+  if (!p) return "";
+  const terms = [
+    p.company,
+    p.rep_name,
+    ...p.catalog.map((c) => c.name),
+    "pull request",
+    "PR",
+    "codebase",
+    "repository",
+    "commit",
+    "merge",
+    "knowledge graph",
+    "MCP",
+    "SOC 2",
+  ]
+    .map((s) => (s || "").trim())
+    .filter(Boolean);
+  return Array.from(new Set(terms)).join(", ");
+}
+
 export default function App() {
   const [dbStatus, setDbStatus] = useState<DbStatus>("initializing");
   const [dbError, setDbError] = useState<string | null>(null);
@@ -155,6 +180,12 @@ export default function App() {
   const [report, setReport] = useState<CoachingReport | null>(null);
   // Bumped after a call is scored so the pet (bottom of Coaching) re-reads history.
   const [petRefresh, setPetRefresh] = useState(0);
+  // Pet celebration tier for the latest dial: 0 = logged dial (spin), 1 = scored
+  // call / voicemail (+ eats), 2 = score > 50 (+ confetti + backflip).
+  const [petTier, setPetTier] = useState(1);
+  // Bumped to fire a pet celebration — separate from petRefresh (which reloads
+  // history), so the on-press spin+eat can fire before the score returns.
+  const [petCelebrate, setPetCelebrate] = useState(0);
   // MEDDPICC is scored separately, on demand (a cold call rarely has real signal).
   const [meddpicc, setMeddpicc] = useState<MeddpiccItem[] | null>(null);
   const [meddNote, setMeddNote] = useState<string | null>(null);
@@ -319,7 +350,7 @@ export default function App() {
     // load can take a couple seconds, so don't make the UI wait to feel live.
     setRecording(true);
     try {
-      await invoke("begin_recording");
+      await invoke("begin_recording", { vocab: buildVocab(profile) });
     } catch (e) {
       setCaptureError(String(e));
       setRecording(false);
@@ -436,6 +467,8 @@ export default function App() {
         "INSERT INTO call (prospect, call_date, model, overall_score, grade_band) VALUES (?, ?, ?, ?, ?)",
         ["No-answer / disconnect", localIsoDate(new Date()), "", null, "logged"],
       );
+      setPetTier(0); // baseline celebration — just a spin
+      setPetCelebrate((c) => c + 1);
       setPetRefresh((r) => r + 1);
       setLogMsg("Dial logged ✓");
       window.setTimeout(() => setLogMsg(null), 1800);
@@ -458,6 +491,10 @@ export default function App() {
     }
     setAnalyzing(true);
     setAnalyzeError(null);
+    // Instant feedback on press — spin + eat now, don't wait for the model. The
+    // confetti + backflip wait for a >50 result below.
+    setPetTier(1);
+    setPetCelebrate((c) => c + 1);
     try {
       // Non-secret config — the key is read in Rust, never sent from here.
       const context = {
@@ -496,7 +533,12 @@ export default function App() {
       } catch (e) {
         setAnalyzeError(`Report ready but could not be saved to history: ${String(e)}`);
       }
-      setPetRefresh((r) => r + 1); // feed the pet
+      setPetRefresh((r) => r + 1); // reload history so the pet's happiness updates
+      // The spin + eat already fired on press; a strong score adds backflip + confetti.
+      if (out.overall_score !== null && out.overall_score > 50) {
+        setPetTier(2);
+        setPetCelebrate((c) => c + 1);
+      }
       const scoreText = out.overall_score === null ? "no score (thin call)" : `${out.overall_score}/100`;
       void notify("Cold Call Coach", `Coaching ready for ${who || "your call"} — ${scoreText}`);
     } catch (e) {
@@ -675,7 +717,7 @@ export default function App() {
             <Panel
               title="Coaching"
               subtitle="Scorecard + how to do better"
-              footer={<Pet refreshKey={petRefresh} />}
+              footer={<Pet refreshKey={petRefresh} celebrateSignal={petCelebrate} celebrateTier={petTier} />}
               action={
                 report ? (
                   <CopyButton text={reportToText(report, prospect)} label="Copy" />

@@ -18,7 +18,9 @@ src-tauri/gen/schemas
 #   model: download ggml-medium.en.bin into src-tauri/resources/models/
 #   CUDA:  copy cudart64_*/cublas64_*/cublasLt64_* from the CUDA Toolkit
 src-tauri/resources/models/*.bin
+src-tauri/resources/models/*.onnx
 src-tauri/resources/cuda/*.dll
+src-tauri/resources/sherpa/*.dll
 
 # env / secrets
 .env

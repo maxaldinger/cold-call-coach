@@ -23,6 +23,17 @@ pub struct Segment {
     pub text: String,
 }
 
+/// A diarized span: [start_cs, end_cs) attributed to a speaker cluster index.
+/// Produced by `crate::diarize` and consumed by `clean_retranscribe` to label
+/// the prospect side. Defined here so transcribe.rs stays agnostic of the
+/// diarization backend (no sherpa dependency leaks in).
+#[derive(Clone, Copy, Debug)]
+pub struct SpeakerSpan {
+    pub start_cs: i64,
+    pub end_cs: i64,
+    pub speaker: i32,
+}
+
 /// A loaded whisper model. Loading is expensive (esp. medium.en on the GPU), so
 /// build one and keep it for the app's lifetime. Transcription spins up a fresh
 /// decode state per call, which is cheap relative to the model load.
@@ -358,18 +369,86 @@ fn source_loop<P>(
     }
 }
 
+/// Merge owned (label, segment) pairs into one transcript ordered by start time,
+/// coalescing consecutive same-label segments. Like `merge_transcript` but with
+/// PER-SEGMENT labels — used when prospect segments carry per-speaker labels.
+pub fn merge_labeled(mut items: Vec<(String, Segment)>) -> String {
+    items.sort_by_key(|(_, s)| s.t0_cs);
+    let mut lines: Vec<(String, String)> = Vec::new();
+    for (label, seg) in items {
+        match lines.last_mut() {
+            Some(last) if last.0 == label => {
+                last.1.push(' ');
+                last.1.push_str(&seg.text);
+            }
+            _ => lines.push((label, seg.text)),
+        }
+    }
+    lines
+        .into_iter()
+        .map(|(label, text)| format!("[{label}] {text}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The diarization cluster covering `mid_cs` (a segment's midpoint); falls back
+/// to the nearest span by time gap when no span strictly contains it.
+fn speaker_at(mid_cs: i64, spans: &[SpeakerSpan]) -> i32 {
+    let mut best: Option<(i64, i32)> = None;
+    for sp in spans {
+        if mid_cs >= sp.start_cs && mid_cs < sp.end_cs {
+            return sp.speaker;
+        }
+        let gap = if mid_cs < sp.start_cs {
+            sp.start_cs - mid_cs
+        } else {
+            mid_cs - sp.end_cs
+        };
+        if best.map_or(true, |(g, _)| gap < g) {
+            best = Some((gap, sp.speaker));
+        }
+    }
+    best.map(|(_, s)| s).unwrap_or(0)
+}
+
 /// On-demand max-quality pass: transcribe each retained buffer in full (no
-/// windowing) and merge + label. Slower, but no window-boundary artifacts.
+/// windowing), then label. The mic is always "You"; the prospect side is split
+/// into "Prospect 1/2/3" using the diarization `prospect_spans` (by voiceprint).
+/// If diarization found 0 or 1 speakers (empty/short audio, or a 1:1 call), the
+/// prospect stays a single "Prospect".
 pub fn clean_retranscribe(
     transcriber: &Transcriber,
     mic_16k: &[f32],
     sys_16k: &[f32],
+    prospect_spans: &[SpeakerSpan],
 ) -> Result<String, String> {
-    let ae = transcriber
+    let you = transcriber
         .transcribe_segments(mic_16k)
-        .map_err(|e| format!("AE (mic) clean pass failed: {e}"))?;
+        .map_err(|e| format!("you (mic) clean pass failed: {e}"))?;
     let prospect = transcriber
         .transcribe_segments(sys_16k)
         .map_err(|e| format!("prospect (system) clean pass failed: {e}"))?;
-    Ok(merge_transcript(&[("AE", &ae), ("Prospect", &prospect)]))
+
+    let n_speakers = prospect_spans
+        .iter()
+        .map(|s| s.speaker)
+        .max()
+        .map(|m| m + 1)
+        .unwrap_or(0);
+    let multi = n_speakers >= 2;
+
+    let mut items: Vec<(String, Segment)> = Vec::with_capacity(you.len() + prospect.len());
+    for s in you {
+        items.push(("You".to_string(), s));
+    }
+    for s in prospect {
+        let label = if multi {
+            let spk = speaker_at((s.t0_cs + s.t1_cs) / 2, prospect_spans);
+            format!("Prospect {}", spk + 1)
+        } else {
+            "Prospect".to_string()
+        };
+        items.push((label, s));
+    }
+    Ok(merge_labeled(items))
 }

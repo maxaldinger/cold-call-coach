@@ -29,6 +29,11 @@ tauri-plugin-notification = "2.3.3"
 keyring = { version = "3", features = ["windows-native"] }
 reqwest = { version = "0.13.4", features = ["json"] }
 tauri-plugin-dialog = "2.7.1"
+# `shared` (dynamic) instead of the default `static`: the prebuilt static lib
+# uses the /MT C runtime, but whisper-rs-sys builds whisper.cpp with /MD — MSVC
+# refuses to mix them. The shared build is /MD (matches whisper) and ships DLLs
+# (bundled like the CUDA runtime). See src-tauri/resources/sherpa/.
+sherpa-onnx = { version = "1.13.3", default-features = false, features = ["shared"] }
 
 [profile.release]
 codegen-units = 1

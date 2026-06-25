@@ -1,6 +1,7 @@
 pub mod aec;
 pub mod audio;
 pub mod coaching;
+pub mod diarize;
 pub mod transcribe;
 
 use std::sync::{Arc, Mutex};
@@ -31,6 +32,9 @@ struct TranscriptionState {
     transcriber: Mutex<Option<Arc<Transcriber>>>,
     live: Mutex<Option<transcribe::LiveSession>>,
     last_transcript: Mutex<Option<String>>,
+    /// Loaded once and reused: the offline speaker-diarization pipeline used in
+    /// the clean pass to split the prospect side into Prospect 1/2/3.
+    diarizer: Mutex<Option<Arc<diarize::Diarizer>>>,
 }
 
 #[derive(Serialize, Clone)]
@@ -50,19 +54,18 @@ struct StopResult {
 
 /// Resolve the GGML model path: the bundled resource in production, or the dev
 /// `resources/models` folder when running via `tauri dev`.
-fn resolve_model_path(app: &AppHandle) -> Result<String, String> {
-    const NAME: &str = "ggml-medium.en.bin";
+fn resolve_model_path(app: &AppHandle, name: &str) -> Result<String, String> {
     if let Ok(p) = app
         .path()
-        .resolve(format!("models/{NAME}"), tauri::path::BaseDirectory::Resource)
+        .resolve(format!("models/{name}"), tauri::path::BaseDirectory::Resource)
     {
         if p.exists() {
             return Ok(p.to_string_lossy().into_owned());
         }
     }
     for cand in [
-        format!("resources/models/{NAME}"),
-        format!("src-tauri/resources/models/{NAME}"),
+        format!("resources/models/{name}"),
+        format!("src-tauri/resources/models/{name}"),
     ] {
         let pb = std::path::PathBuf::from(&cand);
         if pb.exists() {
@@ -70,8 +73,26 @@ fn resolve_model_path(app: &AppHandle) -> Result<String, String> {
         }
     }
     Err(format!(
-        "whisper model '{NAME}' not found (looked in app resources and ./resources/models)"
+        "model '{name}' not found (looked in app resources and ./resources/models)"
     ))
+}
+
+/// Lazily load + cache the offline diarization pipeline (segmentation + embedding
+/// models bundled as resources). Reused across clean passes.
+fn get_or_load_diarizer(
+    app: &AppHandle,
+    tx: &TranscriptionState,
+) -> Result<Arc<diarize::Diarizer>, String> {
+    let mut slot = tx
+        .diarizer
+        .lock()
+        .map_err(|_| "transcription state poisoned".to_string())?;
+    if slot.is_none() {
+        let seg = resolve_model_path(app, "seg-pyannote.onnx")?;
+        let emb = resolve_model_path(app, "spk-embed-en.onnx")?;
+        *slot = Some(Arc::new(diarize::Diarizer::load(&seg, &emb)?));
+    }
+    Ok(slot.as_ref().unwrap().clone())
 }
 
 #[tauri::command]
@@ -128,7 +149,7 @@ fn begin_recording(
             .lock()
             .map_err(|_| "transcription state poisoned".to_string())?;
         if slot.is_none() {
-            let path = resolve_model_path(&app)?;
+            let path = resolve_model_path(&app, "ggml-medium.en.bin")?;
             *slot = Some(Arc::new(Transcriber::load(&path, true)?));
         }
         slot.as_ref().unwrap().clone()
@@ -253,6 +274,7 @@ fn stop_recording(
 fn clean_retranscribe(
     audio: tauri::State<'_, AudioState>,
     tx: tauri::State<'_, TranscriptionState>,
+    app: AppHandle,
     aec: bool,
 ) -> Result<String, String> {
     let (mic, sys) = {
@@ -281,7 +303,14 @@ fn clean_retranscribe(
     } else {
         mic
     };
-    let transcript = transcribe::clean_retranscribe(&transcriber, &mic_proc, &sys)?;
+    // Best-effort diarization of the prospect (loopback) side: split multiple
+    // remote speakers into Prospect 1/2/3. If the models are missing or it errors,
+    // degrade to a single "Prospect" — never fail the clean pass over diarization.
+    let spans = match get_or_load_diarizer(&app, tx.inner()) {
+        Ok(d) => d.diarize(&sys).unwrap_or_default(),
+        Err(_) => Vec::new(),
+    };
+    let transcript = transcribe::clean_retranscribe(&transcriber, &mic_proc, &sys, &spans)?;
     *tx.last_transcript
         .lock()
         .map_err(|_| "transcription state poisoned".to_string())? = Some(transcript.clone());

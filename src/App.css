@@ -103,8 +103,8 @@
 .record-bar {
   display: flex;
   align-items: center;
-  gap: 18px;
-  padding: 20px 22px;
+  gap: 14px;
+  padding: 11px 22px;
   border-bottom: 1px solid var(--border);
   flex: 0 0 auto;
 }
@@ -112,9 +112,9 @@
 .record-btn {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  padding: 11px 22px;
-  font-size: 15px;
+  gap: 9px;
+  padding: 8px 18px;
+  font-size: 14px;
   font-weight: 600;
   color: #fff;
   background: var(--accent-dim);
@@ -150,7 +150,7 @@
 }
 .timer {
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 22px;
+  font-size: 18px;
   font-weight: 600;
   letter-spacing: 0.04em;
 }
@@ -366,14 +366,14 @@
 .sources {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 16px 22px;
+  gap: 8px;
+  padding: 10px 22px;
   border-bottom: 1px solid var(--border);
 }
 .source-row {
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 12px;
 }
 .source-head {
   width: 132px;
@@ -398,7 +398,7 @@
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 7px 10px;
+  padding: 5px 9px;
   font-size: 13px;
   font-family: inherit;
 }
@@ -414,7 +414,7 @@
 }
 /* Slightly taller bars in the source rows for at-a-glance readability. */
 .source-meter .meter-bar {
-  height: 12px;
+  height: 9px;
 }
 .source-diag {
   display: flex;
@@ -1220,14 +1220,14 @@
 
 /* Headphone reminder under the device rows (the separation depends on it). */
 .headphone-note {
-  margin: 0 22px 0;
-  padding: 8px 12px;
-  font-size: 12px;
-  line-height: 1.5;
+  margin: 8px 22px 0;
+  padding: 5px 11px;
+  font-size: 11px;
+  line-height: 1.45;
   color: #c7d2fe;
   background: #1e1b4b22;
   border: 1px solid #312e81;
-  border-radius: 9px;
+  border-radius: 8px;
 }
 
 /* The "you" speaker label mirrors the old AE styling. */

@@ -30,9 +30,15 @@
     "targets": "all",
     "resources": {
       "resources/models/ggml-medium.en.bin": "models/ggml-medium.en.bin",
+      "resources/models/seg-pyannote.onnx": "models/seg-pyannote.onnx",
+      "resources/models/spk-embed-en.onnx": "models/spk-embed-en.onnx",
       "resources/cuda/cudart64_13.dll": "cudart64_13.dll",
       "resources/cuda/cublas64_13.dll": "cublas64_13.dll",
-      "resources/cuda/cublasLt64_13.dll": "cublasLt64_13.dll"
+      "resources/cuda/cublasLt64_13.dll": "cublasLt64_13.dll",
+      "resources/sherpa/onnxruntime.dll": "onnxruntime.dll",
+      "resources/sherpa/onnxruntime_providers_shared.dll": "onnxruntime_providers_shared.dll",
+      "resources/sherpa/sherpa-onnx-c-api.dll": "sherpa-onnx-c-api.dll",
+      "resources/sherpa/sherpa-onnx-cxx-api.dll": "sherpa-onnx-cxx-api.dll"
     },
     "icon": [
       "icons/32x32.png",

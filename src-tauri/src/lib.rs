@@ -19,9 +19,10 @@ use transcribe::Transcriber;
 #[derive(Default)]
 struct AudioState {
     session: Mutex<Option<CaptureHandle>>,
-    /// Last recording's two 16 kHz mono buffers (mic, system) — retained in
-    /// memory for a transcription retry; never written to disk.
-    last_capture: Mutex<Option<(Vec<f32>, Vec<f32>)>>,
+    /// Last recording's two 16 kHz mono buffers (mic, system) plus each source's
+    /// start offset (cs) from the shared record clock — retained in memory for a
+    /// transcription retry so the clean pass aligns the streams; never on disk.
+    last_capture: Mutex<Option<(Vec<f32>, Vec<f32>, i64, i64)>>,
 }
 
 /// Transcription state: the model is loaded once and reused; the live worker
@@ -266,7 +267,12 @@ fn stop_recording(
         .last_capture
         .lock()
         .map_err(|_| "audio state poisoned".to_string())? =
-        Some((result.mic_16k_mono, result.sys_16k_mono));
+        Some((
+            result.mic_16k_mono,
+            result.sys_16k_mono,
+            result.mic_start_offset_cs,
+            result.sys_start_offset_cs,
+        ));
     *tx.last_transcript
         .lock()
         .map_err(|_| "transcription state poisoned".to_string())? = Some(transcript.clone());
@@ -287,7 +293,7 @@ fn clean_retranscribe(
     app: AppHandle,
     aec: bool,
 ) -> Result<String, String> {
-    let (mic, sys) = {
+    let (mic, sys, mic_offset_cs, sys_offset_cs) = {
         let cap = audio
             .last_capture
             .lock()
@@ -325,8 +331,15 @@ fn clean_retranscribe(
         .lock()
         .map_err(|_| "transcription state poisoned".to_string())?
         .clone();
-    let transcript =
-        transcribe::clean_retranscribe(&transcriber, &mic_proc, &sys, &spans, vocab.as_deref())?;
+    let transcript = transcribe::clean_retranscribe(
+        &transcriber,
+        &mic_proc,
+        &sys,
+        mic_offset_cs,
+        sys_offset_cs,
+        &spans,
+        vocab.as_deref(),
+    )?;
     *tx.last_transcript
         .lock()
         .map_err(|_| "transcription state poisoned".to_string())? = Some(transcript.clone());
@@ -505,8 +518,8 @@ fn migrations() -> Vec<Migration> {
 }
 
 // The frontend bundle (slate theme, always-light pet "terrarium", quick dial
-// logger, ball-play + tiered scored-call celebrations, etc.) is embedded at compile
-// time by generate_context!, so each release build re-embeds the latest `dist`.
+// logger, ball-play + tiered celebrations w/ full-terrarium confetti, etc.) is
+// embedded at compile time by generate_context!, so each build re-embeds `dist`.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Route whisper.cpp / ggml logs through the `log` crate; with no logger

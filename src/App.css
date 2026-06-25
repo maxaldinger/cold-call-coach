@@ -2621,37 +2621,43 @@
   width: 28px;
   height: 28px;
 }
-/* scored-call confetti burst (tier 2) */
+/* scored-call confetti (tier 2) — a full-terrarium shower, not a puff at the pet.
+   The layer covers the whole habitat; each bit falls from the top in its column. */
 .confetti {
   position: absolute;
-  top: 12px;
-  left: 50%;
-  width: 0;
-  height: 0;
-  z-index: 6;
+  inset: 0;
+  z-index: 20;
+  overflow: hidden;
   pointer-events: none;
 }
 .confetti-bit {
   position: absolute;
-  left: 0;
-  top: 0;
-  width: 7px;
-  height: 11px;
+  top: -16px;
+  width: 8px;
+  height: 12px;
   border-radius: 2px;
   opacity: 0;
-  animation: confetti-fly 1.4s ease-out forwards;
+  animation-name: confetti-fall;
+  animation-timing-function: cubic-bezier(0.22, 0.55, 0.45, 1);
+  animation-fill-mode: forwards;
 }
-@keyframes confetti-fly {
+.confetti-bit.round {
+  border-radius: 50%;
+}
+@keyframes confetti-fall {
   0% {
     opacity: 0;
-    transform: translate(0, 0) rotate(0deg);
+    transform: translateY(-14px) translateX(0) rotate(0deg);
   }
   12% {
     opacity: 1;
   }
+  88% {
+    opacity: 1;
+  }
   100% {
     opacity: 0;
-    transform: translate(var(--dx), var(--dy)) rotate(var(--rot));
+    transform: translateY(var(--fall)) translateX(var(--drift)) rotate(var(--rot));
   }
 }
 

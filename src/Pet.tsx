@@ -427,17 +427,25 @@ const SPK = [
   { t: 18, l: 44, d: 1250 },
 ];
 
-// Festive bits for the scored-call confetti burst (tier 2). A deterministic
-// upward fan — dx/dy/rot are CSS custom props the burst animation reads.
+// Scored-call confetti (tier 2): a full-terrarium shower, not a puff at the pet.
+// Each bit falls from the top in its own column with drift + spin. The scatter is
+// a deterministic hash of the index (stable across renders, no RNG).
 const CONFETTI_COLORS = ["#fb7185", "#fbbf24", "#34d399", "#60a5fa", "#a78bfa", "#f472b6"];
-const CONFETTI = Array.from({ length: 16 }, (_, i) => {
-  const ang = ((-150 + (i / 15) * 120) * Math.PI) / 180;
-  const dist = 42 + (i % 5) * 11;
+const CONFETTI = Array.from({ length: 46 }, (_, i) => {
+  const hash = (seed: number) => {
+    const x = Math.sin((i + 1) * seed) * 43758.5453;
+    return x - Math.floor(x); // 0..1
+  };
   return {
-    dx: Math.round(Math.cos(ang) * dist),
-    dy: Math.round(Math.sin(ang) * dist - 12),
-    rot: (i % 2 ? 1 : -1) * (150 + (i % 4) * 80),
-    delay: (i % 6) * 25,
+    left: Math.round(hash(12.9898) * 98) + 1, // 1–99% across the full width
+    fall: 108 + Math.round(hash(5.51) * 72), // 108–180px — past the 116px floor
+    drift: Math.round((hash(9.17) - 0.5) * 80), // ±40px sideways sway
+    rot: Math.round((hash(2.13) - 0.5) * 1080), // tumble
+    delay: Math.round(hash(78.233) * 340), // 0–340ms stagger
+    dur: 1100 + Math.round(hash(3.71) * 600), // 1.1–1.7s fall
+    w: 6 + Math.round(hash(1.7) * 5), // 6–11px
+    h: 8 + Math.round(hash(4.2) * 7), // 8–15px
+    round: hash(6.61) > 0.72,
     color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
   };
 });
@@ -665,10 +673,12 @@ export function Pet({
     const tier = celebrateTier;
     setCel(tier);
     celRef.current = tier;
+    // Hold long enough for the full-terrarium confetti shower (tier 2) to fall.
+    const hold = tier >= 2 ? 2300 : 1700;
     const t = window.setTimeout(() => {
       setCel(null);
       celRef.current = null;
-    }, 1700);
+    }, hold);
     return () => window.clearTimeout(t);
   }, [celebrateSignal]);
 
@@ -807,6 +817,28 @@ export function Pet({
         </div>
       )}
 
+      {cel != null && cel >= 2 && (
+        <div className="confetti" aria-hidden="true">
+          {CONFETTI.map((c, i) => (
+            <span
+              key={i}
+              className={`confetti-bit${c.round ? " round" : ""}`}
+              style={cssVars({
+                left: `${c.left}%`,
+                width: `${c.w}px`,
+                height: `${c.h}px`,
+                background: c.color,
+                "--fall": `${c.fall}px`,
+                "--drift": `${c.drift}px`,
+                "--rot": `${c.rot}deg`,
+                animationDelay: `${c.delay}ms`,
+                animationDuration: `${c.dur}ms`,
+              })}
+            />
+          ))}
+        </div>
+      )}
+
       <div
         className={`critter ${moving ? "is-moving" : ""} ${
           cel === null ? "" : cel >= 2 ? "cel-flip" : "cel-spin"
@@ -878,23 +910,6 @@ export function Pet({
             {cel === 1 && (
               <div className="morsel" aria-hidden="true">
                 <Morsel />
-              </div>
-            )}
-            {cel >= 2 && (
-              <div className="confetti" aria-hidden="true">
-                {CONFETTI.map((c, i) => (
-                  <span
-                    key={i}
-                    className="confetti-bit"
-                    style={cssVars({
-                      "--dx": `${c.dx}px`,
-                      "--dy": `${c.dy}px`,
-                      "--rot": `${c.rot}deg`,
-                      animationDelay: `${c.delay}ms`,
-                      background: c.color,
-                    })}
-                  />
-                ))}
               </div>
             )}
           </>

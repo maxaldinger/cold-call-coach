@@ -470,10 +470,12 @@ export default function App() {
       setPetTier(0); // baseline celebration — just a spin
       setPetCelebrate((c) => c + 1);
       setPetRefresh((r) => r + 1);
-      setLogMsg("Dial logged ✓");
-      window.setTimeout(() => setLogMsg(null), 1800);
+      setLogMsg("Logged ✓"); // shown briefly on the always-visible button
+      window.setTimeout(() => setLogMsg(null), 1600);
     } catch (e) {
-      setLogMsg(`Couldn't log: ${String(e)}`);
+      console.error("log dial failed", e);
+      setLogMsg("Error — retry");
+      window.setTimeout(() => setLogMsg(null), 2500);
     } finally {
       setLogging(false);
     }
@@ -719,43 +721,40 @@ export default function App() {
               subtitle="Scorecard + how to do better"
               footer={<Pet refreshKey={petRefresh} celebrateSignal={petCelebrate} celebrateTier={petTier} />}
               action={
-                report ? (
-                  <CopyButton text={reportToText(report, prospect)} label="Copy" />
-                ) : undefined
+                <div className="panel-actions">
+                  <button
+                    className="ghost-btn"
+                    onClick={logDial}
+                    disabled={logging || recording}
+                    title="Log a non-connect (no answer / disconnect / wrong number) — counts toward your call volume, nothing to score. Always available."
+                  >
+                    {logging ? "Logging…" : logMsg ?? "+ Log dial"}
+                  </button>
+                  {report && <CopyButton text={reportToText(report, prospect)} label="Copy" />}
+                </div>
               }
             >
               {report ? (
                 <ReportView report={report} />
               ) : (
                 <div className="coaching-cta">
-                  <div className="cta-row">
-                    <button
-                      className="generate-btn"
-                      onClick={runAnalyze}
-                      disabled={analyzing || recording || !transcript.trim()}
-                      title={
-                        !transcript.trim()
-                          ? "Record and stop a call first"
-                          : "Score the call and get coaching"
-                      }
-                    >
-                      {analyzing ? "Scoring…" : "Score this call"}
-                    </button>
-                    <button
-                      className="ghost-btn log-dial-btn"
-                      onClick={logDial}
-                      disabled={logging || recording}
-                      title="Log a non-connect (no answer / disconnected number) — counts toward your call volume, nothing to score"
-                    >
-                      {logging ? "Logging…" : "+ Log dial"}
-                    </button>
-                  </div>
-                  {logMsg && <p className="log-msg">{logMsg}</p>}
+                  <button
+                    className="generate-btn"
+                    onClick={runAnalyze}
+                    disabled={analyzing || recording || !transcript.trim()}
+                    title={
+                      !transcript.trim()
+                        ? "Record and stop a call first"
+                        : "Score the call and get coaching"
+                    }
+                  >
+                    {analyzing ? "Scoring…" : "Score this call"}
+                  </button>
                   <Empty>
                     Record a call, stop, then hit <strong>Score this call</strong> — you'll get a scored
-                    breakdown (opener, value pitch vs. what Bito does, objection handling, next step) plus
-                    the single highest-leverage fix. Or <strong>+ Log dial</strong> a no-answer/disconnect
-                    so it still counts toward your volume (and feeds the pet) with nothing to score.
+                    breakdown plus the single highest-leverage fix. Or <strong>+ Log dial</strong>{" "}
+                    (top-right, always there) a no-answer / disconnect / wrong number so it still counts
+                    toward your volume, nothing to score.
                   </Empty>
                 </div>
               )}

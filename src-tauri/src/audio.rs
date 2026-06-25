@@ -67,6 +67,12 @@ struct SourceState {
     peak: f32,
     /// Total native mono samples ever captured (running, survives flushes).
     total_native: u64,
+    /// Centiseconds from `record_started` to this source's FIRST accumulated
+    /// sample. The mic and the loopback stream don't begin filling at the same
+    /// instant; adding this per-source offset to each segment's timestamp anchors
+    /// both timelines to one clock, so the merge orders speakers correctly
+    /// instead of the loopback (later-starting) reading as if it came first.
+    start_offset_cs: i64,
 }
 
 impl SourceState {
@@ -85,7 +91,7 @@ impl SourceState {
         self.error = Some(err);
     }
 
-    fn push_mono(&mut self, mono: &[f32], accumulate: bool) {
+    fn push_mono(&mut self, mono: &[f32], accumulate: bool, start_offset_cs: i64) {
         for &s in mono {
             let a = s.abs();
             if a > self.recent_peak {
@@ -97,6 +103,11 @@ impl SourceState {
         }
         // Peaks always update (live meter). Audio is only retained while recording.
         if accumulate {
+            // First retained sample → stamp this source's offset from the shared
+            // record clock (total_native is reset to 0 by begin_recording).
+            if self.total_native == 0 {
+                self.start_offset_cs = start_offset_cs;
+            }
             self.total_native += mono.len() as u64;
             self.native.extend_from_slice(mono);
         }
@@ -108,6 +119,7 @@ impl SourceState {
         self.native.clear();
         self.out16k.clear();
         self.total_native = 0;
+        self.start_offset_cs = 0;
         self.peak = 0.0;
     }
 
@@ -210,6 +222,10 @@ pub struct CaptureResult {
     /// used for the live ticker + the dev WAV.
     pub mic_16k_mono: Vec<f32>,
     pub sys_16k_mono: Vec<f32>,
+    /// Per-source offsets (cs) from the shared record clock, so the clean pass
+    /// aligns the two full-buffer transcriptions the same way the live merge does.
+    pub mic_start_offset_cs: i64,
+    pub sys_start_offset_cs: i64,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -345,8 +361,10 @@ impl CaptureHandle {
         let mut s = self.shared.lock().expect("audio state poisoned");
         s.mic.reset_buffers();
         s.sys.reset_buffers();
-        s.accumulate = true;
+        // Set the clock BEFORE opening the gate so the first accumulated sample on
+        // either stream measures a valid offset against it.
         s.record_started = Some(Instant::now());
+        s.accumulate = true;
     }
 
     /// Stop retaining audio: resample + mix what was recorded, return it, then
@@ -361,6 +379,8 @@ impl CaptureHandle {
         s.sys.flush_segment();
         let mic = s.mic.out16k.clone();
         let sys = s.sys.out16k.clone();
+        let mic_start_offset_cs = s.mic.start_offset_cs;
+        let sys_start_offset_cs = s.sys.start_offset_cs;
         // The mix is only for the dev-only WAV proof; the two buffers above are
         // what drive speaker-attributed transcription.
         let mixed = mix(&mic, &sys);
@@ -384,6 +404,8 @@ impl CaptureHandle {
             summary,
             mic_16k_mono: mic,
             sys_16k_mono: sys,
+            mic_start_offset_cs,
+            sys_start_offset_cs,
         }
     }
 
@@ -428,6 +450,9 @@ pub struct SourceDelta {
     pub samples: Vec<f32>,
     pub rate: u32,
     pub recording: bool,
+    /// This source's offset (cs) from the shared record clock — added to segment
+    /// timestamps so the two streams merge in true chronological order.
+    pub start_offset_cs: i64,
 }
 
 /// A cloneable read handle into the live capture buffers. Each per-source
@@ -444,6 +469,7 @@ impl AudioTap {
             samples: s.mic.native.get(from..).unwrap_or(&[]).to_vec(),
             rate: s.mic.native_rate,
             recording: s.accumulate,
+            start_offset_cs: s.mic.start_offset_cs,
         }
     }
 
@@ -453,6 +479,7 @@ impl AudioTap {
             samples: s.sys.native.get(from..).unwrap_or(&[]).to_vec(),
             rate: s.sys.native_rate,
             recording: s.accumulate,
+            start_offset_cs: s.sys.start_offset_cs,
         }
     }
 }
@@ -565,7 +592,11 @@ fn system_run(
             }
             if let Ok(mut sh) = shared.lock() {
                 let acc = sh.accumulate;
-                sh.sys.push_mono(&mono, acc);
+                let off = sh
+                    .record_started
+                    .map(|t| (t.elapsed().as_millis() as i64) / 10)
+                    .unwrap_or(0);
+                sh.sys.push_mono(&mono, acc, off);
             }
         }
 
@@ -747,7 +778,11 @@ fn mic_run(
         if !mono.is_empty() {
             if let Ok(mut s) = shared_cb.lock() {
                 let acc = s.accumulate;
-                s.mic.push_mono(&mono, acc);
+                let off = s
+                    .record_started
+                    .map(|t| (t.elapsed().as_millis() as i64) / 10)
+                    .unwrap_or(0);
+                s.mic.push_mono(&mono, acc, off);
             }
         }
     };

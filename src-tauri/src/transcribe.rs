@@ -77,6 +77,15 @@ impl Transcriber {
         params.set_translate(false);
         params.set_language(Some("en"));
         params.set_suppress_blank(true);
+        params.set_suppress_nst(true);
+        // Anti-hallucination for dead air / ring tones / hold music: stay greedy at
+        // temperature 0 and apply whisper's quality gates so empty windows fail
+        // quietly instead of inventing URLs and "thank you for watching". The
+        // per-segment no-speech check below drops whatever still slips through.
+        params.set_temperature(0.0);
+        params.set_no_speech_thold(0.6);
+        params.set_entropy_thold(2.4);
+        params.set_logprob_thold(-1.0);
         // Keep whisper.cpp from printing to our stdout.
         params.set_print_special(false);
         params.set_print_progress(false);
@@ -101,6 +110,13 @@ impl Transcriber {
             let seg = segment.to_string();
             let t = seg.trim();
             if t.is_empty() || is_nonspeech(t) {
+                continue;
+            }
+            // Whisper invents text on silence / ring tones / hold music. Two guards:
+            // (1) when the model itself is confident the window had no speech, and
+            // (2) a blocklist of its classic dead-air artifacts (URLs, "thanks for
+            // watching", repetition loops, keypad-tone digit runs).
+            if segment.no_speech_probability() > 0.6 || is_hallucination(t) {
                 continue;
             }
             out.push(Segment {
@@ -158,6 +174,52 @@ pub fn merge_transcript(sources: &[(&str, &[Segment])]) -> String {
 /// brackets/parens, e.g. "[BLANK_AUDIO]", "(music)", "[ Silence ]". Drop them.
 fn is_nonspeech(seg: &str) -> bool {
     (seg.starts_with('[') && seg.ends_with(']')) || (seg.starts_with('(') && seg.ends_with(')'))
+}
+
+/// Whisper's well-known dead-air hallucinations. It was trained on a lot of
+/// YouTube, so silence / ring tones / hold music decode into URLs, "thanks for
+/// watching" sign-offs, repeated filler, or keypad-tone digit runs. These never
+/// occur in a real cold call, so dropping them is safe.
+fn is_hallucination(seg: &str) -> bool {
+    let s = seg.trim();
+    let lower = s.to_lowercase();
+    // Spoken web addresses don't happen on a dial; these are pure artifacts.
+    if lower.contains("www.")
+        || lower.contains("http://")
+        || lower.contains("https://")
+        || lower.contains(".com/")
+        || lower.contains(".org")
+    {
+        return true;
+    }
+    const FILLERS: [&str; 6] = [
+        "thank you for watching",
+        "thanks for watching",
+        "thank you for listening",
+        "please subscribe",
+        "subtitles by",
+        "amara.org",
+    ];
+    if FILLERS.iter().any(|f| lower.contains(f)) {
+        return true;
+    }
+    // A run of digits/punctuation with no letters is a keypad / DTMF tone artifact
+    // (e.g. "5, 7, 1, 4, 4, 2"), not speech.
+    let has_alpha = s.chars().any(|c| c.is_alphabetic());
+    let digits = s.chars().filter(|c| c.is_ascii_digit()).count();
+    if !has_alpha && digits >= 4 {
+        return true;
+    }
+    // Degenerate repetition loop, e.g. "Thank you. Thank you. Thank you."
+    let parts: Vec<&str> = lower
+        .split(['.', '!', '?'])
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty())
+        .collect();
+    if parts.len() >= 3 && parts.iter().all(|p| *p == parts[0]) {
+        return true;
+    }
+    false
 }
 
 fn suggested_threads() -> std::os::raw::c_int {
@@ -289,7 +351,7 @@ where
         threads.push(thread::spawn(move || {
             source_loop(Label::Ae, tr, ip, st, sh, em, move |from| {
                 let d = tap.snapshot_mic_since(from);
-                (d.samples, d.rate)
+                (d.samples, d.rate, d.start_offset_cs)
             });
         }));
     }
@@ -300,7 +362,7 @@ where
         threads.push(thread::spawn(move || {
             source_loop(Label::Prospect, tr, ip, st, sh, em, move |from| {
                 let d = tap.snapshot_sys_since(from);
-                (d.samples, d.rate)
+                (d.samples, d.rate, d.start_offset_cs)
             });
         }));
     }
@@ -323,7 +385,7 @@ fn source_loop<P>(
     emit: Arc<dyn Fn() + Send + Sync>,
     pull: P,
 ) where
-    P: Fn(usize) -> (Vec<f32>, u32),
+    P: Fn(usize) -> (Vec<f32>, u32, i64),
 {
     let mut from = 0usize;
     let mut buf: Vec<f32> = Vec::new();
@@ -333,7 +395,7 @@ fn source_loop<P>(
     loop {
         let stopping = stop.load(Ordering::Acquire);
 
-        let (samples, rate) = pull(from);
+        let (samples, rate, start_offset_cs) = pull(from);
         from += samples.len();
         if !samples.is_empty() && rate > 0 {
             buf.extend(resample_linear(&samples, rate, TARGET_RATE));
@@ -344,8 +406,10 @@ fn source_loop<P>(
             let segs = transcriber
                 .transcribe_segments(&buf[commit_idx..], initial_prompt.as_deref())
                 .unwrap_or_default();
-            // Window-relative timestamps -> absolute (offset by commit point).
-            let offset_cs = (commit_idx as i64) * 100 / (TARGET_RATE as i64);
+            // Window-relative timestamps -> absolute: shared-clock start offset for
+            // this source + its commit point. The start offset aligns the two
+            // streams so the merge orders You vs Prospect chronologically.
+            let offset_cs = start_offset_cs + (commit_idx as i64) * 100 / (TARGET_RATE as i64);
             let abs: Vec<Segment> = segs
                 .into_iter()
                 .map(|s| Segment {
@@ -441,6 +505,8 @@ pub fn clean_retranscribe(
     transcriber: &Transcriber,
     mic_16k: &[f32],
     sys_16k: &[f32],
+    mic_offset_cs: i64,
+    sys_offset_cs: i64,
     prospect_spans: &[SpeakerSpan],
     initial_prompt: Option<&str>,
 ) -> Result<String, String> {
@@ -461,16 +527,32 @@ pub fn clean_retranscribe(
 
     let mut items: Vec<(String, Segment)> = Vec::with_capacity(you.len() + prospect.len());
     for s in you {
-        items.push(("You".to_string(), s));
+        items.push((
+            "You".to_string(),
+            Segment {
+                t0_cs: s.t0_cs + mic_offset_cs,
+                t1_cs: s.t1_cs + mic_offset_cs,
+                text: s.text,
+            },
+        ));
     }
     for s in prospect {
+        // Pick the speaker from the diarization spans (which are in sys-stream time,
+        // pre-offset), THEN shift the segment onto the shared clock for the merge.
         let label = if multi {
             let spk = speaker_at((s.t0_cs + s.t1_cs) / 2, prospect_spans);
             format!("Prospect {}", spk + 1)
         } else {
             "Prospect".to_string()
         };
-        items.push((label, s));
+        items.push((
+            label,
+            Segment {
+                t0_cs: s.t0_cs + sys_offset_cs,
+                t1_cs: s.t1_cs + sys_offset_cs,
+                text: s.text,
+            },
+        ));
     }
     Ok(merge_labeled(items))
 }

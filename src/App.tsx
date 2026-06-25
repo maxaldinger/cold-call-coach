@@ -164,6 +164,10 @@ export default function App() {
   const [summaryText, setSummaryText] = useState<string | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
+  // Quick dial logger: a non-connect (no answer / disconnected number) counts
+  // toward call volume and feeds the pet, with nothing to score.
+  const [logging, setLogging] = useState(false);
+  const [logMsg, setLogMsg] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -420,6 +424,28 @@ export default function App() {
     }
   };
 
+  // Log a non-connect dial (no answer / disconnected number). Inserts a call row
+  // with no score and no coaching report, so it counts toward volume + feeds the
+  // pet (a null score is treated as a full dial) without a record→score pass.
+  const logDial = async () => {
+    setLogging(true);
+    setLogMsg(null);
+    try {
+      const db = await Database.load(DB);
+      await db.execute(
+        "INSERT INTO call (prospect, call_date, model, overall_score, grade_band) VALUES (?, ?, ?, ?, ?)",
+        ["No-answer / disconnect", localIsoDate(new Date()), "", null, "logged"],
+      );
+      setPetRefresh((r) => r + 1);
+      setLogMsg("Dial logged ✓");
+      window.setTimeout(() => setLogMsg(null), 1800);
+    } catch (e) {
+      setLogMsg(`Couldn't log: ${String(e)}`);
+    } finally {
+      setLogging(false);
+    }
+  };
+
   // The one structured Claude call. The transcript + key stay in Rust; only the
   // parsed report crosses back. On failure the transcript is retained in Rust
   // memory, so the user can fix the issue and click again — nothing lost.
@@ -660,22 +686,34 @@ export default function App() {
                 <ReportView report={report} />
               ) : (
                 <div className="coaching-cta">
-                  <button
-                    className="generate-btn"
-                    onClick={runAnalyze}
-                    disabled={analyzing || recording || !transcript.trim()}
-                    title={
-                      !transcript.trim()
-                        ? "Record and stop a call first"
-                        : "Score the call and get coaching"
-                    }
-                  >
-                    {analyzing ? "Scoring…" : "Score this call"}
-                  </button>
+                  <div className="cta-row">
+                    <button
+                      className="generate-btn"
+                      onClick={runAnalyze}
+                      disabled={analyzing || recording || !transcript.trim()}
+                      title={
+                        !transcript.trim()
+                          ? "Record and stop a call first"
+                          : "Score the call and get coaching"
+                      }
+                    >
+                      {analyzing ? "Scoring…" : "Score this call"}
+                    </button>
+                    <button
+                      className="ghost-btn log-dial-btn"
+                      onClick={logDial}
+                      disabled={logging || recording}
+                      title="Log a non-connect (no answer / disconnected number) — counts toward your call volume, nothing to score"
+                    >
+                      {logging ? "Logging…" : "+ Log dial"}
+                    </button>
+                  </div>
+                  {logMsg && <p className="log-msg">{logMsg}</p>}
                   <Empty>
                     Record a call, stop, then hit <strong>Score this call</strong> — you'll get a scored
                     breakdown (opener, value pitch vs. what Bito does, objection handling, next step) plus
-                    the single highest-leverage fix.
+                    the single highest-leverage fix. Or <strong>+ Log dial</strong> a no-answer/disconnect
+                    so it still counts toward your volume (and feeds the pet) with nothing to score.
                   </Empty>
                 </div>
               )}

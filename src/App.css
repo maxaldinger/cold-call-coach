@@ -771,8 +771,23 @@
 .coaching-cta {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   align-items: flex-start;
+}
+.coaching-cta .cta-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.log-dial-btn {
+  font-size: 13px;
+}
+.log-msg {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ok);
 }
 /* MEDDPICC one-line overall read above the scorecard */
 .meddpicc-readout {

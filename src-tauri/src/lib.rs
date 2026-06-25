@@ -488,8 +488,8 @@ fn migrations() -> Vec<Migration> {
     }]
 }
 
-// The frontend bundle (including the slate dark theme + the always-light pet
-// "terrarium") is embedded at compile time by generate_context!, so each release
+// The frontend bundle (slate theme, always-light pet "terrarium", quick dial
+// logger, etc.) is embedded at compile time by generate_context!, so each release
 // build re-embeds the latest `dist`.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

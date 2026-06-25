@@ -1,16 +1,15 @@
 //! System-audio (WASAPI loopback) + microphone capture into an in-memory buffer.
 //!
-//! Two endpoints are captured concurrently by two independent worker threads:
-//!   * SYSTEM — a WASAPI render endpoint captured in loopback mode via the
-//!     `wasapi` crate (the prospect's audio: Zoom/Meet/YouTube/etc.).
-//!   * MIC — a WASAPI capture endpoint via `cpal` (the AE's voice).
+//! Two endpoints are captured concurrently by two independent worker threads,
+//! both via the `wasapi` crate (shared-mode polling at each device's own mix
+//! format from GetMixFormat — no 48k/2ch assumption — then down-mixed to mono and
+//! resampled to 16 kHz):
+//!   * SYSTEM — a WASAPI render endpoint captured in loopback mode (the
+//!     prospect's audio: Zoom/Meet/YouTube/etc.).
+//!   * MIC — a WASAPI capture endpoint (the AE's voice).
 //!
-//! Why two crates: cpal's loopback support is unreliable (it can return a false
-//! positive on self-rendered audio while capturing nothing from real apps), so
-//! the system path uses the `wasapi` crate directly — open the render endpoint's
-//! audio client in shared mode with the loopback flag, read at the device's own
-//! mix format (via GetMixFormat — no 48k/2ch assumption), then down-mix to mono
-//! and resample to 16 kHz. The mic path stays on cpal, which works fine.
+//! Both sides go through `wasapi` (not cpal) so input devices enumerate with the
+//! same friendly names as output, and both share one capture loop (`capture_run`).
 //!
 //! Each source accumulates into the same in-memory pipeline: native samples are
 //! resampled to 16 kHz per segment, and on stop both sources are summed into one
@@ -20,11 +19,10 @@
 //! memory only. The single on-disk artifact is a throwaway WAV emitted ONLY in
 //! debug builds (`#[cfg(debug_assertions)]`) to prove capture during dev.
 //!
-//! Threading: cpal `Stream` and the `wasapi` COM objects are all `!Send`, so each
-//! lives entirely on its own worker thread and never crosses it. The control
-//! surface (`CaptureHandle`) holds only `Send` handles (Arc/AtomicBool/JoinHandle).
-//! COM apartments are kept separate per thread: the wasapi worker initialises MTA;
-//! cpal threads let cpal initialise its own (STA). They never mix on one thread.
+//! Threading: the `wasapi` COM objects are `!Send`, so each lives entirely on its
+//! own worker thread and never crosses it. The control surface (`CaptureHandle`)
+//! holds only `Send` handles (Arc/AtomicBool/JoinHandle). Each worker thread (and
+//! each device-enumeration thread) initialises the MTA COM apartment.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -32,8 +30,6 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Data, SampleFormat};
 use serde::Serialize;
 use wasapi::{
     initialize_mta, AudioCaptureClient, AudioClient, DeviceEnumerator, Direction, SampleType,
@@ -165,6 +161,22 @@ struct Shared {
     record_started: Option<Instant>,
 }
 
+/// Which captured source a worker feeds. Lets one capture loop serve both.
+#[derive(Clone, Copy)]
+enum Src {
+    Mic,
+    Sys,
+}
+
+impl Shared {
+    fn source(&mut self, src: Src) -> &mut SourceState {
+        match src {
+            Src::Mic => &mut self.mic,
+            Src::Sys => &mut self.sys,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Serializable types crossing to the UI
 // ---------------------------------------------------------------------------
@@ -274,7 +286,7 @@ pub struct CaptureHandle {
 impl CaptureHandle {
     /// Open the selected endpoints and begin a monitor session (live levels, no
     /// audio retained yet). `render_id` / `capture_id` select specific endpoints
-    /// (by WASAPI id / cpal name); `None` means the system default.
+    /// (by WASAPI id); `None` means the system default.
     pub fn start(
         render_id: Option<String>,
         capture_id: Option<String>,
@@ -496,7 +508,9 @@ fn spawn_system(
     let (tx, rx) = mpsc::channel();
     let sh = shared.clone();
     let st = stop.clone();
-    let thread = thread::spawn(move || system_run(sh, st, render_id, tx));
+    let thread = thread::spawn(move || {
+        capture_run(sh, st, Src::Sys, move || open_system(render_id.as_deref()), tx)
+    });
     (
         Worker {
             stop,
@@ -521,21 +535,24 @@ struct SysSetup {
     poll_ms: u64,
 }
 
-fn system_run(
+/// One capture worker: open the device, then poll → decode → mono → push to the
+/// chosen source until stopped. Drives both the mic and the loopback side; the
+/// only difference is the `open` closure (capture endpoint vs render loopback).
+fn capture_run(
     shared: Arc<Mutex<Shared>>,
     stop: Arc<AtomicBool>,
-    render_id: Option<String>,
+    src: Src,
+    open: impl FnOnce() -> Result<SysSetup, String>,
     ready: mpsc::Sender<Result<(), String>>,
 ) {
-    // This thread's COM apartment is MTA (wasapi). cpal is never used here.
+    // Every wasapi worker thread runs in the MTA COM apartment.
     let _ = initialize_mta();
 
-    let setup = open_system(render_id.as_deref());
-    let setup = match setup {
+    let setup = match open() {
         Ok(s) => s,
         Err(e) => {
             if let Ok(mut sh) = shared.lock() {
-                sh.sys.fail(None, e.clone());
+                sh.source(src).fail(None, e.clone());
             }
             let _ = ready.send(Err(e));
             return;
@@ -543,7 +560,7 @@ fn system_run(
     };
 
     if let Ok(mut sh) = shared.lock() {
-        sh.sys
+        sh.source(src)
             .begin(setup.name.clone(), setup.rate, setup.channels as u16);
     }
     let _ = ready.send(Ok(()));
@@ -596,7 +613,7 @@ fn system_run(
                     .record_started
                     .map(|t| (t.elapsed().as_millis() as i64) / 10)
                     .unwrap_or(0);
-                sh.sys.push_mono(&mono, acc, off);
+                sh.source(src).push_mono(&mono, acc, off);
             }
         }
 
@@ -606,19 +623,35 @@ fn system_run(
     let _ = setup.audio_client.stop_stream();
     if let Some(e) = run_err {
         if let Ok(mut sh) = shared.lock() {
-            sh.sys.error = Some(e);
+            sh.source(src).error = Some(e);
         }
     }
 }
 
-/// Open the render endpoint in loopback mode at its native mix format.
+/// Open the system (loopback) side: a render endpoint captured in the Capture
+/// direction => loopback, at its native mix format.
 fn open_system(render_id: Option<&str>) -> Result<SysSetup, String> {
     let enumerator = DeviceEnumerator::new().map_err(|e| e.to_string())?;
     let device = open_render_device(&enumerator, render_id)?;
+    finish_open(device, "loopback")
+}
+
+/// Open the microphone: a real capture endpoint, via the same wasapi path as the
+/// system side (so input devices carry the same friendly names as output).
+fn open_mic(capture_id: Option<&str>) -> Result<SysSetup, String> {
+    let enumerator = DeviceEnumerator::new().map_err(|e| e.to_string())?;
+    let device = open_capture_device(&enumerator, capture_id)?;
+    finish_open(device, "microphone")
+}
+
+/// Shared open path for both sides: read the device's actual mix format (no
+/// 48k/2ch assumption) and start a shared-mode polling capture client. Both the
+/// loopback (render device) and the mic (capture device) initialise in the
+/// Capture direction — the loopback-ness comes purely from the device kind.
+fn finish_open(device: wasapi::Device, label: &str) -> Result<SysSetup, String> {
     let name = device.get_friendlyname().ok();
 
     let mut audio_client = device.get_iaudioclient().map_err(|e| e.to_string())?;
-    // Read the device's actual mix format — do not assume 48k/2ch.
     let format = audio_client.get_mixformat().map_err(|e| e.to_string())?;
     let channels = format.get_nchannels() as usize;
     if channels == 0 {
@@ -631,15 +664,15 @@ fn open_system(render_id: Option<&str>) -> Result<SysSetup, String> {
     let bytes_per_sample = block_align / channels;
 
     let (def_time, _min_time) = audio_client.get_device_period().map_err(|e| e.to_string())?;
-    // Render endpoint + Direction::Capture + shared mode => loopback flag.
-    // Loopback does not reliably support event timing, so poll.
+    // Shared mode, Direction::Capture, polling (loopback can't use event timing;
+    // we poll the mic the same way so one loop serves both).
     let mode = StreamMode::PollingShared {
         autoconvert: false,
         buffer_duration_hns: def_time,
     };
     audio_client
         .initialize_client(&format, &Direction::Capture, &mode)
-        .map_err(|e| format!("initialize loopback failed: {e}"))?;
+        .map_err(|e| format!("initialize {label} failed: {e}"))?;
     let capture_client = audio_client.get_audiocaptureclient().map_err(|e| e.to_string())?;
     audio_client.start_stream().map_err(|e| e.to_string())?;
 
@@ -682,6 +715,29 @@ fn open_render_device(
     }
 }
 
+fn open_capture_device(
+    enumerator: &DeviceEnumerator,
+    id: Option<&str>,
+) -> Result<wasapi::Device, String> {
+    match id {
+        Some(want) => {
+            let coll = enumerator
+                .get_device_collection(&Direction::Capture)
+                .map_err(|e| e.to_string())?;
+            for dev in &coll {
+                let dev = dev.map_err(|e| e.to_string())?;
+                if dev.get_id().map_err(|e| e.to_string())? == want {
+                    return Ok(dev);
+                }
+            }
+            Err(format!("capture device '{want}' not found (unplugged?)"))
+        }
+        None => enumerator
+            .get_default_device(&Direction::Capture)
+            .map_err(|e| e.to_string()),
+    }
+}
+
 /// Decode one little-endian sample of the given format to normalised f32.
 fn decode_sample(bytes: &[u8], sample_type: SampleType, bits: u16) -> f32 {
     match sample_type {
@@ -711,7 +767,7 @@ fn decode_sample(bytes: &[u8], sample_type: SampleType, bits: u16) -> f32 {
 }
 
 // ---------------------------------------------------------------------------
-// Microphone (cpal) worker
+// Microphone (wasapi) worker
 // ---------------------------------------------------------------------------
 
 fn spawn_mic(
@@ -722,7 +778,9 @@ fn spawn_mic(
     let (tx, rx) = mpsc::channel();
     let sh = shared.clone();
     let st = stop.clone();
-    let thread = thread::spawn(move || mic_run(sh, st, capture_id, tx));
+    let thread = thread::spawn(move || {
+        capture_run(sh, st, Src::Mic, move || open_mic(capture_id.as_deref()), tx)
+    });
     (
         Worker {
             stop,
@@ -730,140 +788,6 @@ fn spawn_mic(
         },
         rx,
     )
-}
-
-#[allow(deprecated)] // cpal Device::name() is deprecated; the endpoint name is all we need.
-fn mic_run(
-    shared: Arc<Mutex<Shared>>,
-    stop: Arc<AtomicBool>,
-    capture_id: Option<String>,
-    ready: mpsc::Sender<Result<(), String>>,
-) {
-    let host = cpal::default_host();
-    let device = match select_input_device(&host, capture_id.as_deref()) {
-        Some(d) => d,
-        None => {
-            if let Ok(mut s) = shared.lock() {
-                s.mic.fail(None, "no input device".into());
-            }
-            let _ = ready.send(Err("no input device".into()));
-            return;
-        }
-    };
-    let name = device.name().ok();
-
-    let supported = match device.default_input_config() {
-        Ok(c) => c,
-        Err(e) => {
-            if let Ok(mut s) = shared.lock() {
-                s.mic.fail(name.clone(), e.to_string());
-            }
-            let _ = ready.send(Err(e.to_string()));
-            return;
-        }
-    };
-    let sample_format = supported.sample_format();
-    let config: cpal::StreamConfig = supported.config();
-    let rate = config.sample_rate; // cpal 0.17: SampleRate is an alias for u32
-    let channels = config.channels;
-
-    if let Ok(mut s) = shared.lock() {
-        s.mic.begin(name.clone(), rate, channels);
-    }
-
-    let shared_cb = shared.clone();
-    let ch = channels as usize;
-    let data_fn = move |data: &Data, _: &cpal::InputCallbackInfo| {
-        let mono = to_mono(data, sample_format, ch);
-        if !mono.is_empty() {
-            if let Ok(mut s) = shared_cb.lock() {
-                let acc = s.accumulate;
-                let off = s
-                    .record_started
-                    .map(|t| (t.elapsed().as_millis() as i64) / 10)
-                    .unwrap_or(0);
-                s.mic.push_mono(&mono, acc, off);
-            }
-        }
-    };
-    let shared_err = shared.clone();
-    let err_fn = move |e: cpal::StreamError| {
-        eprintln!("[audio] mic stream error: {e}");
-        if let Ok(mut s) = shared_err.lock() {
-            s.mic.error = Some(e.to_string());
-        }
-    };
-
-    let stream = match device.build_input_stream_raw(&config, sample_format, data_fn, err_fn, None)
-    {
-        Ok(s) => s,
-        Err(e) => {
-            if let Ok(mut s) = shared.lock() {
-                s.mic.fail(name.clone(), e.to_string());
-            }
-            let _ = ready.send(Err(e.to_string()));
-            return;
-        }
-    };
-    if let Err(e) = stream.play() {
-        if let Ok(mut s) = shared.lock() {
-            s.mic.fail(name.clone(), e.to_string());
-        }
-        let _ = ready.send(Err(e.to_string()));
-        return;
-    }
-
-    let _ = ready.send(Ok(()));
-    while !stop.load(Ordering::Acquire) {
-        thread::sleep(Duration::from_millis(40));
-    }
-    // `stream` drops here -> capture stops.
-}
-
-#[allow(deprecated)]
-fn select_input_device(host: &cpal::Host, want: Option<&str>) -> Option<cpal::Device> {
-    match want {
-        Some(name) => host
-            .input_devices()
-            .ok()
-            .and_then(|mut devs| devs.find(|d| d.name().ok().as_deref() == Some(name)))
-            .or_else(|| host.default_input_device()),
-        None => host.default_input_device(),
-    }
-}
-
-/// Down-mix an interleaved cpal buffer of arbitrary sample format to mono f32.
-fn to_mono(data: &Data, fmt: SampleFormat, channels: usize) -> Vec<f32> {
-    match fmt {
-        SampleFormat::F32 => downmix(data.as_slice::<f32>().unwrap_or(&[]), channels, |s| s),
-        SampleFormat::I16 => downmix(data.as_slice::<i16>().unwrap_or(&[]), channels, |s| {
-            s as f32 / 32_768.0
-        }),
-        SampleFormat::U16 => downmix(data.as_slice::<u16>().unwrap_or(&[]), channels, |s| {
-            (s as f32 - 32_768.0) / 32_768.0
-        }),
-        SampleFormat::I32 => downmix(data.as_slice::<i32>().unwrap_or(&[]), channels, |s| {
-            s as f32 / 2_147_483_648.0
-        }),
-        SampleFormat::F64 => downmix(data.as_slice::<f64>().unwrap_or(&[]), channels, |s| s as f32),
-        _ => Vec::new(),
-    }
-}
-
-fn downmix<T: Copy>(samples: &[T], channels: usize, conv: impl Fn(T) -> f32) -> Vec<f32> {
-    if channels <= 1 {
-        return samples.iter().map(|&s| conv(s)).collect();
-    }
-    let frames = samples.len() / channels;
-    let mut out = Vec::with_capacity(frames);
-    for f in 0..frames {
-        let mut acc = 0.0f32;
-        for c in 0..channels {
-            acc += conv(samples[f * channels + c]);
-        }
-        out.push(acc / channels as f32);
-    }
-    out
 }
 
 // ---------------------------------------------------------------------------
@@ -947,9 +871,9 @@ fn dump_dev_wav(_samples: &[f32], _rate: u32) -> Option<String> {
 // Device enumeration
 // ---------------------------------------------------------------------------
 
-/// Enumerate all active render (output) and capture (mic) endpoints. Render is
-/// enumerated via wasapi (MTA thread); capture via cpal (its own COM apartment).
-/// The two run on separate threads so their COM apartments never clash.
+/// Enumerate all active render (output) and capture (mic) endpoints. Both are
+/// enumerated via wasapi on their own MTA threads, so they share the friendly
+/// naming and run without clashing.
 pub fn list_devices() -> Result<DeviceList, String> {
     let render_h = thread::spawn(|| {
         let _ = initialize_mta();
@@ -1000,21 +924,37 @@ fn enum_render() -> Result<Vec<DeviceDesc>, String> {
 
 #[allow(deprecated)]
 fn enum_capture() -> Result<Vec<DeviceDesc>, String> {
-    let host = cpal::default_host();
-    let default_name = host.default_input_device().and_then(|d| d.name().ok());
+    // Enumerate via wasapi (same path as render), so input devices get the same
+    // friendly names as output instead of cpal's generic "Microphone" labels.
+    // This thread therefore needs the MTA COM apartment.
+    let _ = initialize_mta();
+    let enumerator = DeviceEnumerator::new().map_err(|e| e.to_string())?;
+    let default_id = enumerator
+        .get_default_device(&Direction::Capture)
+        .ok()
+        .and_then(|d| d.get_id().ok());
+    let coll = enumerator
+        .get_device_collection(&Direction::Capture)
+        .map_err(|e| e.to_string())?;
     let mut out = Vec::new();
-    if let Ok(devices) = host.input_devices() {
-        for d in devices {
-            if let Ok(name) = d.name() {
-                let is_default = Some(&name) == default_name.as_ref();
-                // cpal devices are identified by name in this app.
-                out.push(DeviceDesc {
-                    id: name.clone(),
-                    name,
-                    is_default,
-                });
-            }
-        }
+    for dev in &coll {
+        let dev = match dev {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+        let id = match dev.get_id() {
+            Ok(i) => i,
+            Err(_) => continue,
+        };
+        let name = dev
+            .get_friendlyname()
+            .unwrap_or_else(|_| "Unknown microphone".into());
+        let is_default = Some(&id) == default_id.as_ref();
+        out.push(DeviceDesc {
+            id,
+            name,
+            is_default,
+        });
     }
     Ok(out)
 }

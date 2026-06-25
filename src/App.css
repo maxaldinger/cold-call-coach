@@ -1157,6 +1157,164 @@
   max-height: 46vh;
 }
 
+/* ---- Scoreboard ---- */
+.sb-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding-right: 4px;
+}
+.sb-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.sb-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.sb-card {
+  flex: 1 1 160px;
+  min-width: 150px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 14px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.sb-label {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.sb-value {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--text);
+}
+.sb-delta {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.sb-delta.up {
+  color: var(--ok);
+}
+.sb-delta.down {
+  color: var(--danger);
+}
+.sb-chart-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+.sb-chart-head h3 {
+  margin: 0;
+  font-size: 15px;
+}
+.sb-target-key {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.sb-daybars {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 132px;
+  padding: 0 2px;
+  border-bottom: 1px solid var(--border);
+}
+.sb-daybar-col {
+  flex: 1 1 0;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+}
+.sb-daybar {
+  width: 100%;
+  border-radius: 3px 3px 0 0;
+  background: var(--text-faint);
+  transition: height 0.4s ease;
+}
+.sb-daybar.t-low {
+  background: var(--text-faint);
+  opacity: 0.5;
+}
+.sb-daybar.t-ok {
+  background: var(--warn);
+}
+.sb-daybar.t-hit {
+  background: var(--ok);
+}
+.sb-daybar.is-today {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.sb-target-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px dashed var(--ok);
+  opacity: 0.6;
+  pointer-events: none;
+}
+.sb-months {
+  width: 100%;
+  border-collapse: collapse;
+}
+.sb-months td {
+  padding: 5px 6px;
+  vertical-align: middle;
+}
+.sb-months tr.is-current {
+  background: var(--accent-dim);
+}
+.sb-mname {
+  width: 42px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.sb-mbar {
+  height: 12px;
+  min-width: 2px;
+  border-radius: 3px;
+  background: var(--accent);
+}
+.sb-mdials {
+  width: 48px;
+  text-align: right;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.sb-mavg {
+  width: 72px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.sb-year-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sb-yr-btn {
+  padding: 2px 9px;
+}
+.sb-year {
+  font-size: 15px;
+  font-weight: 600;
+  min-width: 46px;
+  text-align: center;
+}
+
 /* ---- Panel action cluster + per-panel error ---- */
 .panel-actions {
   display: flex;

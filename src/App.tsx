@@ -9,6 +9,7 @@ import {
 } from "@tauri-apps/plugin-notification";
 import { Settings } from "./Settings";
 import { History } from "./History";
+import { Scoreboard } from "./Scoreboard";
 import { Pet } from "./Pet";
 import { ContextProfile, loadContext } from "./context";
 import {
@@ -170,6 +171,7 @@ export default function App() {
   const [profileError, setProfileError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [scoreboardOpen, setScoreboardOpen] = useState(false);
   const seededRef = useRef(false);
 
   // Coaching report (scored from the Coaching panel). The prospect name is no
@@ -591,6 +593,22 @@ export default function App() {
             {theme === "dark" ? "☀" : "☾"}
           </button>
           <button
+            className={`icon-btn ${scoreboardOpen ? "is-active" : ""}`}
+            title={
+              profile
+                ? "Scoreboard — your dials + scores over the month and year"
+                : "Scoreboard (waiting for context to load)"
+            }
+            disabled={!profile}
+            onClick={() => {
+              setScoreboardOpen((v) => !v);
+              setHistoryOpen(false);
+              setSettingsOpen(false);
+            }}
+          >
+            📊
+          </button>
+          <button
             className={`icon-btn ${historyOpen ? "is-active" : ""}`}
             title={
               profile ? "History — past calls and their scores" : "History (waiting for context to load)"
@@ -598,6 +616,7 @@ export default function App() {
             disabled={!profile}
             onClick={() => {
               setHistoryOpen((v) => !v);
+              setScoreboardOpen(false);
               setSettingsOpen(false);
             }}
           >
@@ -609,6 +628,7 @@ export default function App() {
             disabled={!profile}
             onClick={() => {
               setSettingsOpen((v) => !v);
+              setScoreboardOpen(false);
               setHistoryOpen(false);
             }}
           >
@@ -632,6 +652,8 @@ export default function App() {
         <Settings profile={profile} onSaved={setProfile} onClose={() => setSettingsOpen(false)} />
       ) : historyOpen && profile ? (
         <History onClose={() => setHistoryOpen(false)} />
+      ) : scoreboardOpen && profile ? (
+        <Scoreboard onClose={() => setScoreboardOpen(false)} />
       ) : (
         <>
           <section className="sources">

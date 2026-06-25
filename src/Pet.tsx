@@ -41,17 +41,26 @@ function loadWorkHours(): WorkHours {
 
 // ---- Daily-arc mood model ----------------------------------------------------
 
-// He wakes at CONTENT_BASE. Hunger pressure ramps to PRESSURE_MAX across the work
-// day, so with zero calls he hits ~0 (dead) by quitting time. Each scored call
-// adds PER_CALL (±15% by score; a voicemail = a full dial). Tuned so pacing your
-// ~40 dials evenly carries him from content at the open to thriving by close.
-const CONTENT_BASE = 24; // morning baseline — sits in the "content" band
-const PRESSURE_MAX = 20; // full-day hunger pull; with no calls he hits dead by close
-const PER_CALL = 1.2; // feed per dial (±15% by score); ~40 paced dials => thriving
-const DEAD_AT = 8; // happiness below this during work hours => collapsed
-// How the night goes, by where the day ended: dead < 10 ≤ restless < 20 ≤ asleep.
-const NIGHT_DEAD_AT = 10; // ended below this => stays dead overnight
-const NIGHT_OK_AT = 20; // at/above this => peaceful sleep; in between => restless
+// He wakes at CONTENT_BASE (the "content" rung). Hunger pressure ramps to
+// PRESSURE_MAX across the work day, so doing nothing slides him to dead by close.
+// Each dial adds PER_CALL (±15% by score; a voicemail = a full dial).
+// happiness = CONTENT_BASE + feed − PRESSURE_MAX·t (t = fraction of day elapsed).
+const CONTENT_BASE = 44; // morning baseline — wakes in the "content" band
+const PRESSURE_MAX = 39; // full-day hunger pull; with no calls he hits dead by close
+const PER_CALL = 1.5; // feed per dial (±15% by score)
+// Mood rungs on the 0–100 happiness scale. Tuned so that AT CLOSE (t=1, feed ≈
+// 1.5·dials) the by-5pm dial totals land like this: dead 0–8, hungry 9–18,
+// peckish 19–25, content 26–32, playing 33–40, thriving 41–53, ecstasy 54+. The
+// same total reads higher earlier in the day (the pressure hasn't ramped yet).
+const HUNGRY_AT = 18; // below this => dead
+const PECKISH_AT = 33;
+const CONTENT_AT = 44;
+const PLAYING_AT = 55;
+const THRIVING_AT = 67;
+const ECSTASY_AT = 86;
+// How the night goes, by where the day ended: dead < HUNGRY ≤ restless < CONTENT ≤ asleep.
+const NIGHT_DEAD_AT = HUNGRY_AT; // ended dead => stays dead overnight
+const NIGHT_OK_AT = CONTENT_AT; // ended content+ (a real day) => peaceful sleep; between => restless
 
 interface CallRow {
   score: number | null;
@@ -150,12 +159,12 @@ function mood(p: PetState): Mood {
     if (p.happiness < NIGHT_OK_AT) return { word: "restless", nudge: "tossing and turning" };
     return { word: "napping", nudge: "resting until work hours" };
   }
-  if (p.happiness < DEAD_AT) return { word: "dead", nudge: "out cold — dial to revive him" };
-  if (p.happiness < 15) return { word: "hungry", nudge: "feed me — make some calls!" };
-  if (p.happiness < 20) return { word: "peckish", nudge: "pick up the pace" };
-  if (p.happiness < 30) return { word: "content", nudge: "looking good" };
-  if (p.happiness < 40) return { word: "playing", nudge: "on a roll!" };
-  if (p.happiness < 55) return { word: "thriving", nudge: "crushing it!" };
+  if (p.happiness < HUNGRY_AT) return { word: "dead", nudge: "out cold — dial to revive him" };
+  if (p.happiness < PECKISH_AT) return { word: "hungry", nudge: "feed me — make some calls!" };
+  if (p.happiness < CONTENT_AT) return { word: "peckish", nudge: "pick up the pace" };
+  if (p.happiness < PLAYING_AT) return { word: "content", nudge: "looking good" };
+  if (p.happiness < THRIVING_AT) return { word: "playing", nudge: "on a roll!" };
+  if (p.happiness < ECSTASY_AT) return { word: "thriving", nudge: "crushing it!" };
   return { word: "ecstasy", nudge: "untouchable — keep it going!" };
 }
 
@@ -529,11 +538,11 @@ export function Pet({
   // How many piles the pen "should" have right now, from how starved he is.
   const poopTarget = p.isNew
     ? 0
-    : p.happiness < DEAD_AT
+    : p.happiness < HUNGRY_AT
       ? 4
-      : p.happiness < 15
+      : p.happiness < PECKISH_AT
         ? 3
-        : p.happiness < 20
+        : p.happiness < CONTENT_AT
           ? 2
           : 0;
   const activePoops = poops.filter((pp) => !pp.swept);
@@ -723,17 +732,17 @@ export function Pet({
     const rank =
       p.isNew || p.sleeping
         ? null
-        : p.happiness < DEAD_AT
+        : p.happiness < HUNGRY_AT
           ? 0
-          : p.happiness < 15
+          : p.happiness < PECKISH_AT
             ? 1
-            : p.happiness < 20
+            : p.happiness < CONTENT_AT
               ? 2
-              : p.happiness < 30
+              : p.happiness < PLAYING_AT
                 ? 3
-                : p.happiness < 40
+                : p.happiness < THRIVING_AT
                   ? 4
-                  : p.happiness < 55
+                  : p.happiness < ECSTASY_AT
                     ? 5
                     : 6;
     const prev = prevRank.current;

@@ -518,8 +518,9 @@ fn migrations() -> Vec<Migration> {
 }
 
 // The frontend bundle (slate theme, always-light pet "terrarium", quick dial
-// logger, ball-play + tiered celebrations w/ full-terrarium confetti, etc.) is
-// embedded at compile time by generate_context!, so each build re-embeds `dist`.
+// logger, ball-play + tiered celebrations w/ full-terrarium confetti, recalibrated
+// mood curve, etc.) is embedded at compile time by generate_context!, so each
+// build re-embeds `dist`.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Route whisper.cpp / ggml logs through the `log` crate; with no logger

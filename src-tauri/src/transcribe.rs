@@ -119,9 +119,26 @@ impl Transcriber {
             if segment.no_speech_probability() > 0.6 || is_hallucination(t) {
                 continue;
             }
+            let t0 = segment.start_timestamp();
+            let t1 = segment.end_timestamp();
+            // Energy gate — the real backstop. Whisper fabricates lines (URLs,
+            // sign-offs, etc.) over silence and line noise even when its own
+            // no-speech score and the blocklist miss them, so measure the actual
+            // loudness under this segment and drop it if the audio is basically
+            // quiet. 16 kHz mono => 160 samples per centisecond.
+            const SILENCE_RMS: f32 = 0.01;
+            let lo = (t0.max(0) as usize * TARGET_RATE as usize / 100).min(samples_16k_mono.len());
+            let hi = (t1.max(0) as usize * TARGET_RATE as usize / 100).min(samples_16k_mono.len());
+            if hi > lo {
+                let win = &samples_16k_mono[lo..hi];
+                let rms = (win.iter().map(|x| x * x).sum::<f32>() / win.len() as f32).sqrt();
+                if rms < SILENCE_RMS {
+                    continue;
+                }
+            }
             out.push(Segment {
-                t0_cs: segment.start_timestamp(),
-                t1_cs: segment.end_timestamp(),
+                t0_cs: t0,
+                t1_cs: t1,
                 text: t.split_whitespace().collect::<Vec<_>>().join(" "),
             });
         }
@@ -185,12 +202,18 @@ fn is_nonspeech(seg: &str) -> bool {
 fn is_hallucination(seg: &str) -> bool {
     let s = seg.trim();
     let lower = s.to_lowercase();
-    // Spoken web addresses don't happen on a dial; these are pure artifacts.
+    // Spoken web addresses don't happen on a dial; these are pure artifacts. Match
+    // bare domains too (Whisper emits "PissedConsumer.com", "mooji.org", etc. on
+    // dead air — no scheme or slash).
     if lower.contains("www.")
         || lower.contains("http://")
         || lower.contains("https://")
-        || lower.contains(".com/")
+        || lower.contains(".com")
         || lower.contains(".org")
+        || lower.contains(".net")
+        || lower.contains(".io")
+        || lower.contains(".gov")
+        || lower.contains(".edu")
     {
         return true;
     }

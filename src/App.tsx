@@ -370,6 +370,11 @@ export default function App() {
       const res = await invoke<StopResult>("stop_recording");
       setSummary(res.summary);
       setTranscript(res.transcript);
+      // Auto-upgrade to the full-quality pass. It's 100% local (no API, no cost),
+      // so there's no reason to make the user click Clean — show the live transcript
+      // instantly, then refine it in the background. Fire-and-forget: cleanPass owns
+      // its own "cleaning" state + error handling.
+      void cleanPass();
     } catch (e) {
       setCaptureError(String(e));
     } finally {
@@ -934,12 +939,19 @@ function SourceRow({
   );
 }
 
+// "[Label|<cs>] text" → label, optional start time (centiseconds), text. The
+// "|<cs>" is optional so older/stripped transcripts still parse.
+function fmtClock(cs: number): string {
+  const s = Math.max(0, Math.round(cs / 100));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
 function LabeledTranscript({ text }: { text: string }) {
   const lines = text.split("\n").filter((l) => l.trim().length > 0);
   return (
     <div className="labeled">
       {lines.map((line, i) => {
-        const m = line.match(/^\[([^\]]+)\]\s*(.*)$/);
+        const m = line.match(/^\[([^\]|]+)(?:\|(-?\d+))?\]\s*(.*)$/);
         if (!m) {
           return (
             <p key={i} className="t-line">
@@ -947,12 +959,13 @@ function LabeledTranscript({ text }: { text: string }) {
             </p>
           );
         }
-        const label = m[1];
+        const label = m[1].trim();
         const who = label.toLowerCase() === "prospect" ? "prospect" : "you";
         return (
           <p key={i} className={`t-line t-${who}`}>
+            {m[2] !== undefined && <span className="t-time">{fmtClock(Number(m[2]))}</span>}
             <span className="t-label">{label}</span>
-            {m[2]}
+            {m[3]}
           </p>
         );
       })}

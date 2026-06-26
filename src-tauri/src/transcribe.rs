@@ -153,19 +153,21 @@ pub fn merge_transcript(sources: &[(&str, &[Segment])]) -> String {
     // Stable sort by start time keeps each source's internal order on ties.
     all.sort_by_key(|(t0, _, _)| *t0);
 
-    let mut lines: Vec<(String, String)> = Vec::new();
-    for (_, label, text) in all {
+    // Each line carries the start time (cs) of its first segment as "[Label|cs]",
+    // for the UI to show. strip_timestamps() removes it before the LLM sees it.
+    let mut lines: Vec<(i64, String, String)> = Vec::new();
+    for (t0, label, text) in all {
         match lines.last_mut() {
-            Some(last) if last.0 == label => {
-                last.1.push(' ');
-                last.1.push_str(text);
+            Some(last) if last.1 == label => {
+                last.2.push(' ');
+                last.2.push_str(text);
             }
-            _ => lines.push((label.to_string(), text.to_string())),
+            _ => lines.push((t0, label.to_string(), text.to_string())),
         }
     }
     lines
         .into_iter()
-        .map(|(label, text)| format!("[{label}] {text}"))
+        .map(|(t0, label, text)| format!("[{label}|{t0}] {text}"))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -459,19 +461,39 @@ fn source_loop<P>(
 /// PER-SEGMENT labels — used when prospect segments carry per-speaker labels.
 pub fn merge_labeled(mut items: Vec<(String, Segment)>) -> String {
     items.sort_by_key(|(_, s)| s.t0_cs);
-    let mut lines: Vec<(String, String)> = Vec::new();
+    let mut lines: Vec<(i64, String, String)> = Vec::new();
     for (label, seg) in items {
         match lines.last_mut() {
-            Some(last) if last.0 == label => {
-                last.1.push(' ');
-                last.1.push_str(&seg.text);
+            Some(last) if last.1 == label => {
+                last.2.push(' ');
+                last.2.push_str(&seg.text);
             }
-            _ => lines.push((label, seg.text)),
+            _ => lines.push((seg.t0_cs, label, seg.text)),
         }
     }
     lines
         .into_iter()
-        .map(|(label, text)| format!("[{label}] {text}"))
+        .map(|(t0, label, text)| format!("[{label}|{t0}] {text}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Strip the per-line "|<cs>" start-time tokens from a merged transcript, leaving
+/// clean "[Label] text" lines. The timestamps are display-only; the LLM (scoring,
+/// MEDDPICC, summary) reads the stripped form so the tokens never reach the model.
+pub fn strip_timestamps(s: &str) -> String {
+    s.lines()
+        .map(|line| {
+            if line.starts_with('[') {
+                if let Some(close) = line.find(']') {
+                    let inside = &line[1..close];
+                    if let Some(bar) = inside.find('|') {
+                        return format!("[{}]{}", &inside[..bar], &line[close + 1..]);
+                    }
+                }
+            }
+            line.to_string()
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }

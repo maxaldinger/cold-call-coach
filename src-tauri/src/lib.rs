@@ -273,9 +273,11 @@ fn stop_recording(
             result.mic_start_offset_cs,
             result.sys_start_offset_cs,
         ));
+    // Store the LLM-facing copy without the display timestamp tokens.
     *tx.last_transcript
         .lock()
-        .map_err(|_| "transcription state poisoned".to_string())? = Some(transcript.clone());
+        .map_err(|_| "transcription state poisoned".to_string())? =
+        Some(transcribe::strip_timestamps(&transcript));
 
     Ok(StopResult {
         summary: result.summary,
@@ -319,13 +321,15 @@ fn clean_retranscribe(
     } else {
         mic
     };
-    // Best-effort diarization of the prospect (loopback) side: split multiple
-    // remote speakers into Prospect 1/2/3. If the models are missing or it errors,
-    // degrade to a single "Prospect" — never fail the clean pass over diarization.
-    let spans = match get_or_load_diarizer(&app, tx.inner()) {
-        Ok(d) => d.diarize(&sys).unwrap_or_default(),
-        Err(_) => Vec::new(),
-    };
+    // Speaker separation is CHANNEL-based: mic = [You], loopback = [Prospect] — the
+    // one reliable split, and exactly what Granola/Otter do on desktop ("Me" vs
+    // "Them"). Fingerprint-diarizing the single mixed loopback channel into
+    // Prospect 1/2/3 is unreliable — it invented phantom speakers out of one
+    // voicemail greeting — so we don't. Empty spans => the whole loopback side is a
+    // single "Prospect". (diarize.rs stays available for if we ever get true
+    // per-participant channels to cluster from.)
+    let _ = &app; // diarizer intentionally not invoked
+    let spans: Vec<transcribe::SpeakerSpan> = Vec::new();
     let vocab = tx
         .vocab
         .lock()
@@ -340,9 +344,11 @@ fn clean_retranscribe(
         &spans,
         vocab.as_deref(),
     )?;
+    // Store the LLM-facing copy without the display timestamp tokens.
     *tx.last_transcript
         .lock()
-        .map_err(|_| "transcription state poisoned".to_string())? = Some(transcript.clone());
+        .map_err(|_| "transcription state poisoned".to_string())? =
+        Some(transcribe::strip_timestamps(&transcript));
     Ok(transcript)
 }
 
@@ -519,8 +525,8 @@ fn migrations() -> Vec<Migration> {
 
 // The frontend bundle (slate theme, always-light pet "terrarium", quick dial
 // logger, ball-play + tiered celebrations w/ full-terrarium confetti, recalibrated
-// mood curve, scoreboard, etc.) is embedded at compile time by generate_context!,
-// so each build re-embeds `dist`.
+// mood curve, scoreboard, auto-clean on stop, etc.) is embedded at compile time
+// by generate_context!, so each build re-embeds `dist`.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Route whisper.cpp / ggml logs through the `log` crate; with no logger

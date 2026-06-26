@@ -505,6 +505,13 @@
   color: var(--text);
   line-height: 1.55;
 }
+.t-time {
+  display: inline-block;
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-right: 6px;
+  font-variant-numeric: tabular-nums;
+}
 .t-label {
   display: inline-block;
   font-size: 10px;

@@ -448,7 +448,12 @@ fn source_loop<P>(
             {
                 let mut m = shared.lock().expect("transcript poisoned");
                 let sp = m.speaker(label);
-                if uncommitted >= COMMIT_SAMPLES && !abs.is_empty() {
+                // Advance the commit point once the window hits ~12 s — EVEN IF it
+                // produced no segments (a long silence). Otherwise commit_idx never
+                // moves through quiet stretches, the window grows without limit, and
+                // each tick re-transcribes more and more audio — which is what made
+                // long calls crawl and freeze. `abs` may be empty here; that's fine.
+                if uncommitted >= COMMIT_SAMPLES {
                     sp.committed.extend(abs);
                     sp.partial.clear();
                     commit_idx = buf.len();

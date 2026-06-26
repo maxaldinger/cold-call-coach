@@ -370,11 +370,14 @@ export default function App() {
       const res = await invoke<StopResult>("stop_recording");
       setSummary(res.summary);
       setTranscript(res.transcript);
-      // Auto-upgrade to the full-quality pass. It's 100% local (no API, no cost),
-      // so there's no reason to make the user click Clean — show the live transcript
-      // instantly, then refine it in the background. Fire-and-forget: cleanPass owns
-      // its own "cleaning" state + error handling.
-      void cleanPass();
+      // Auto-upgrade to the full-quality pass (100% local, no cost) — but only for
+      // reasonable-length calls. Re-transcribing a very long recording in one pass
+      // is slow + memory-heavy and made the app look frozen, so above ~30 min we
+      // keep the live transcript and leave Clean as a manual, opt-in choice.
+      // Fire-and-forget: cleanPass owns its own "cleaning" state + error handling.
+      if (res.summary.duration_secs <= 30 * 60) {
+        void cleanPass();
+      }
     } catch (e) {
       setCaptureError(String(e));
     } finally {

@@ -59,6 +59,15 @@ impl Transcriber {
 
     /// Transcribe a 16 kHz mono buffer into segments with timestamps. English,
     /// no translation. Non-speech annotation segments are dropped.
+    ///
+    /// Energy-first (VAD-style): the buffer is split into speech regions by
+    /// waveform energy, each region is transcribed separately, and its segments
+    /// are stamped with the region's TRUE sample offset. Whisper's own timestamps
+    /// collapse leading silence — speech after 20 s of dead air gets stamped
+    /// ~0:00 — which scrambled You-vs-Prospect ordering when the two channels
+    /// were merged by time. Waveform offsets are ground truth. Silence is never
+    /// sent to whisper at all: faster, and dead-air hallucinations lose their
+    /// canvas.
     pub fn transcribe_segments(
         &self,
         samples_16k_mono: &[f32],
@@ -67,6 +76,40 @@ impl Transcriber {
         if samples_16k_mono.is_empty() {
             return Ok(Vec::new());
         }
+        let n = samples_16k_mono.len();
+        // whisper.cpp wants ~1 s minimum input; extend short regions into the
+        // buffer, zero-padding only when the buffer itself runs out.
+        let need = (TARGET_RATE as usize) * 11 / 10;
+        let mut out = Vec::new();
+        for (lo, hi) in speech_regions(samples_16k_mono) {
+            let end = hi.max((lo + need).min(n));
+            let padded: Vec<f32>;
+            let win: &[f32] = if end - lo < need {
+                let mut v = samples_16k_mono[lo..end].to_vec();
+                v.resize(need, 0.0);
+                padded = v;
+                &padded
+            } else {
+                &samples_16k_mono[lo..end]
+            };
+            let segs = self.transcribe_window(win, initial_prompt)?;
+            let off = (lo as i64) * 100 / (TARGET_RATE as i64);
+            out.extend(segs.into_iter().map(|s| Segment {
+                t0_cs: s.t0_cs + off,
+                t1_cs: s.t1_cs + off,
+                text: s.text,
+            }));
+        }
+        Ok(out)
+    }
+
+    /// One whisper pass over a single contiguous window (plus the quality gates).
+    /// Timestamps are relative to the window start.
+    fn transcribe_window(
+        &self,
+        samples_16k_mono: &[f32],
+        initial_prompt: Option<&str>,
+    ) -> Result<Vec<Segment>, String> {
         let mut state = self
             .ctx
             .create_state()
@@ -245,6 +288,43 @@ fn is_hallucination(seg: &str) -> bool {
         return true;
     }
     false
+}
+
+/// Energy-based speech detection: split a 16 kHz mono buffer into regions that
+/// actually contain audio energy, with true sample offsets. 100 ms hops; runs of
+/// energetic hops are stitched across short quiet gaps and padded with a little
+/// context. Returns (start_sample, end_sample) pairs, in order.
+fn speech_regions(samples: &[f32]) -> Vec<(usize, usize)> {
+    const HOP: usize = 1600; // 100 ms at 16 kHz
+    const RMS_ON: f32 = 0.01; // speech energy floor (matches the segment gate)
+    const MAX_GAP_HOPS: usize = 12; // stitch speech separated by < 1.2 s of quiet
+    const PAD: usize = 4800; // 300 ms of context on each side
+    const MIN_RUN_HOPS: usize = 2; // drop blips < 200 ms (clicks, beeps)
+
+    let n = samples.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    // Runs of energetic hops as (start_hop, end_hop_exclusive), gap-stitched.
+    let mut runs: Vec<(usize, usize)> = Vec::new();
+    let hops = n.div_ceil(HOP);
+    for h in 0..hops {
+        let lo = h * HOP;
+        let hi = (lo + HOP).min(n);
+        let win = &samples[lo..hi];
+        let rms = (win.iter().map(|x| x * x).sum::<f32>() / win.len() as f32).sqrt();
+        if rms < RMS_ON {
+            continue;
+        }
+        match runs.last_mut() {
+            Some(last) if h <= last.1 + MAX_GAP_HOPS => last.1 = h + 1,
+            _ => runs.push((h, h + 1)),
+        }
+    }
+    runs.into_iter()
+        .filter(|(s, e)| e - s >= MIN_RUN_HOPS)
+        .map(|(s, e)| ((s * HOP).saturating_sub(PAD), (e * HOP + PAD).min(n)))
+        .collect()
 }
 
 fn suggested_threads() -> std::os::raw::c_int {

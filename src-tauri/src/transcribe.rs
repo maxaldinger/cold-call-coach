@@ -169,7 +169,9 @@ impl Transcriber {
             // no-speech score and the blocklist miss them, so measure the actual
             // loudness under this segment and drop it if the audio is basically
             // quiet. 16 kHz mono => 160 samples per centisecond.
-            const SILENCE_RMS: f32 = 0.01;
+            // Low bar on purpose: the VAD already vouched for this region's energy;
+            // this only needs to catch truly-dead air, never soft real speech.
+            const SILENCE_RMS: f32 = 0.004;
             let lo = (t0.max(0) as usize * TARGET_RATE as usize / 100).min(samples_16k_mono.len());
             let hi = (t1.max(0) as usize * TARGET_RATE as usize / 100).min(samples_16k_mono.len());
             if hi > lo {
@@ -296,24 +298,36 @@ fn is_hallucination(seg: &str) -> bool {
 /// context. Returns (start_sample, end_sample) pairs, in order.
 fn speech_regions(samples: &[f32]) -> Vec<(usize, usize)> {
     const HOP: usize = 1600; // 100 ms at 16 kHz
-    const RMS_ON: f32 = 0.01; // speech energy floor (matches the segment gate)
-    const MAX_GAP_HOPS: usize = 12; // stitch speech separated by < 1.2 s of quiet
-    const PAD: usize = 4800; // 300 ms of context on each side
+    const MAX_GAP_HOPS: usize = 15; // stitch speech separated by < 1.5 s of quiet
+    const PAD: usize = 6400; // 400 ms of context on each side (protects word edges)
     const MIN_RUN_HOPS: usize = 2; // drop blips < 200 ms (clicks, beeps)
 
     let n = samples.len();
     if n == 0 {
         return Vec::new();
     }
-    // Runs of energetic hops as (start_hop, end_hop_exclusive), gap-stitched.
-    let mut runs: Vec<(usize, usize)> = Vec::new();
     let hops = n.div_ceil(HOP);
+    let mut rms: Vec<f32> = Vec::with_capacity(hops);
     for h in 0..hops {
         let lo = h * HOP;
         let hi = (lo + HOP).min(n);
         let win = &samples[lo..hi];
-        let rms = (win.iter().map(|x| x * x).sum::<f32>() / win.len() as f32).sqrt();
-        if rms < RMS_ON {
+        rms.push((win.iter().map(|x| x * x).sum::<f32>() / win.len() as f32).sqrt());
+    }
+
+    // ADAPTIVE threshold: a fixed floor eats soft speech on quiet mics and lets
+    // noise through on hot ones. Estimate the noise floor as a low percentile of
+    // hop energy and set the speech bar a multiple above it, clamped to sane
+    // absolute bounds (never above the old 0.01, never below true silence).
+    let mut sorted = rms.clone();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let noise_floor = sorted[(sorted.len() * 15) / 100];
+    let thr = (noise_floor * 3.0).clamp(0.0035, 0.01);
+
+    // Runs of energetic hops as (start_hop, end_hop_exclusive), gap-stitched.
+    let mut runs: Vec<(usize, usize)> = Vec::new();
+    for (h, &r) in rms.iter().enumerate() {
+        if r < thr {
             continue;
         }
         match runs.last_mut() {
